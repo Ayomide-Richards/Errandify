@@ -1,145 +1,209 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Product } from '../../types/product';
-import { calculateSummaryMetrics } from '../../services/productStorage';
-import { Button } from '../common/Button';
-import { Tag, ArrowRight, ClipboardList, TrendingUp } from 'lucide-react';
+import type { Order } from '../../types/order';
+import { MOCK_ORDERS } from '../../data/mockOrders';
+import { OrderStatusBadge } from '../common/Badge';
+import { SalesTrendChart } from './SalesTrendChart';
+import { OrderDetailsModal } from './OrderDetailsModal';
+import { ArrowRight } from 'lucide-react';
 
 interface OverviewViewProps {
   products: Product[];
   onNavigateToProducts: () => void;
-  onAddProduct: () => void;
+  onNavigateToOrders: () => void;
 }
 
 export const OverviewView: React.FC<OverviewViewProps> = ({
-  products,
   onNavigateToProducts,
-  onAddProduct,
+  onNavigateToOrders,
 }) => {
-  const metrics = calculateSummaryMetrics(products);
-  const activeProductsCount = products.filter((p) => !p.isArchived).length;
+  const [orders, setOrders] = useState<Order[]>(MOCK_ORDERS);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Take the top 5 recent orders shown in the reference design
+  const recentOrders = orders.slice(0, 5);
+
+  const handleUpdateOrderStatus = (
+    orderId: string,
+    nextStatus: Order['status'],
+    nextLabel: string
+  ) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId ? { ...o, status: nextStatus, statusLabel: nextLabel } : o
+      )
+    );
+    if (selectedOrder && selectedOrder.id === orderId) {
+      setSelectedOrder((prev) =>
+        prev ? { ...prev, status: nextStatus, statusLabel: nextLabel } : null
+      );
+    }
+  };
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Welcome Header */}
+      {/* Welcome Header (Matching Merchant Dashboard Active.png) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Good morning, XYZ limited 👋
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
-              Open
-            </span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Here's what's happening with your store today.
           </p>
         </div>
+
+        {/* Store Open Status Badge */}
+        <div className="self-start sm:self-auto">
+          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#E8FDF0] text-[#16A34A] border border-[#BBF7D0]/60 shadow-2xs inline-flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
+            Open
+          </span>
+        </div>
       </div>
 
-      {/* Approval Alert Banner (from New.png) */}
-      <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
-            <Tag className="w-5 h-5" />
-          </div>
-          <p className="text-sm text-amber-900 font-medium">
-            You need to add at least 5 products for approval. You have{' '}
-            <strong className="font-bold">{activeProductsCount} products</strong> listed.
+      {/* Summary Cards Grid (Exact match from Merchant Dashboard Active.png: 12, 5, 55, 5) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        {/* Card 1: Today's sales */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs transition-all hover:shadow-sm">
+          <p className="text-xs sm:text-sm font-medium text-slate-500">
+            Today's sales
+          </p>
+          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+            12
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onAddProduct}
-          className="bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 text-white shrink-0 self-start sm:self-auto"
+        {/* Card 2: Pending orders */}
+        <div
+          onClick={onNavigateToOrders}
+          className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs transition-all hover:shadow-sm cursor-pointer hover:border-[#5E17EB]/40 group"
+          title="Click to view pending orders"
         >
-          Add products
-        </Button>
-      </div>
-
-      {/* Overview Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
-          <p className="text-xs sm:text-sm font-medium text-slate-500">Today's sales</p>
-          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2">₦0</p>
+          <p className="text-xs sm:text-sm font-medium text-slate-500 group-hover:text-[#5E17EB] transition-colors">
+            Pending orders
+          </p>
+          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+            5
+          </p>
         </div>
 
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
-          <p className="text-xs sm:text-sm font-medium text-slate-500">Pending orders</p>
-          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2">0</p>
-        </div>
-
+        {/* Card 3: Published products (Notice label from reference: Published products, value 55) */}
         <div
           onClick={onNavigateToProducts}
-          className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs cursor-pointer hover:border-[#5E17EB]/40 transition-colors"
+          className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs transition-all hover:shadow-sm cursor-pointer hover:border-[#5E17EB]/40 group"
+          title="Click to manage store products"
         >
-          <p className="text-xs sm:text-sm font-medium text-slate-500">Listed products</p>
-          <p className="text-2xl sm:text-3xl font-extrabold text-[#5E17EB] mt-2">
-            {metrics.totalProducts}
+          <p className="text-xs sm:text-sm font-medium text-slate-500 group-hover:text-[#5E17EB] transition-colors">
+            Published products
+          </p>
+          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+            55
           </p>
         </div>
 
+        {/* Card 4: Low stock products */}
         <div
           onClick={onNavigateToProducts}
-          className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs cursor-pointer hover:border-[#5E17EB]/40 transition-colors"
+          className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs transition-all hover:shadow-sm cursor-pointer hover:border-[#5E17EB]/40 group"
+          title="Click to check low stock inventory"
         >
-          <p className="text-xs sm:text-sm font-medium text-slate-500">Low stock products</p>
-          <p className="text-2xl sm:text-3xl font-extrabold text-amber-600 mt-2">
-            {metrics.outOfStockProducts}
+          <p className="text-xs sm:text-sm font-medium text-slate-500 group-hover:text-[#5E17EB] transition-colors">
+            Low stock products
+          </p>
+          <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+            5
           </p>
         </div>
       </div>
 
-      {/* Sales Trend Graph Placeholder (Matching New.png) */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-4">
+      {/* Sales Trend Chart (Matching reference image) */}
+      <SalesTrendChart />
+
+      {/* Recent Orders Section (Matching reference image) */}
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-[#5E17EB]" />
-            Sales trend
+          <h3 className="text-base sm:text-lg font-bold text-slate-900">
+            Recent orders
           </h3>
-          <select className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-600 bg-white">
-            <option>Last 7 days</option>
-            <option>Last 30 days</option>
-            <option>This month</option>
-          </select>
-        </div>
 
-        {/* Minimal weekly chart visualization */}
-        <div className="h-48 border border-slate-100 rounded-xl flex items-end justify-between px-6 pb-4 pt-8 bg-slate-50/50">
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, idx) => (
-            <div key={idx} className="flex flex-col items-center gap-2 flex-1">
-              <div
-                className="w-8 sm:w-12 bg-[#5E17EB]/15 rounded-t-md hover:bg-[#5E17EB]/30 transition-colors"
-                style={{ height: `${[15, 30, 20, 45, 60, 35, 20][idx]}%` }}
-              />
-              <span className="text-xs font-semibold text-slate-500">{day}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Recent Orders Section (Matching New.png empty state) */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-900">Recent orders</h3>
-          <button className="text-xs font-semibold text-[#5E17EB] hover:underline flex items-center gap-1">
+          <button
+            onClick={onNavigateToOrders}
+            className="text-xs sm:text-sm font-semibold text-[#5E17EB] hover:text-[#4E12C6] hover:underline flex items-center gap-1 transition-colors"
+          >
             View all <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* Empty orders banner */}
-        <div className="border border-slate-100 rounded-xl p-8 text-center bg-slate-50/30 flex flex-col items-center justify-center space-y-2">
-          <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-1">
-            <ClipboardList className="w-6 h-6 stroke-[1.5]" />
+        {/* Orders Table Container */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs sm:text-sm">
+              {/* Royal Purple Header Row */}
+              <thead className="bg-[#5E17EB] text-white">
+                <tr className="font-semibold select-none text-xs">
+                  <th className="py-3.5 px-4 sm:px-6 w-36">Order no.</th>
+                  <th className="py-3.5 px-4 sm:px-6">Item</th>
+                  <th className="py-3.5 px-4 sm:px-6">Customer</th>
+                  <th className="py-3.5 px-4 sm:px-6">Date & Time</th>
+                  <th className="py-3.5 px-4 sm:px-6 text-center w-40">Status</th>
+                </tr>
+              </thead>
+
+              {/* Table Rows (Matching reference image) */}
+              <tbody className="divide-y divide-slate-100">
+                {recentOrders.map((order) => (
+                  <tr
+                    key={order.id}
+                    onClick={() => setSelectedOrder(order)}
+                    className="hover:bg-[#F8F9FE] transition-colors cursor-pointer group"
+                  >
+                    {/* Order No */}
+                    <td className="py-4 px-4 sm:px-6 font-medium text-slate-700 group-hover:text-[#5E17EB] transition-colors whitespace-nowrap">
+                      {order.orderNumber}
+                    </td>
+
+                    {/* Item */}
+                    <td className="py-4 px-4 sm:px-6 text-slate-800 font-medium">
+                      <span className="block whitespace-pre-line leading-tight">
+                        {order.itemSummary}
+                      </span>
+                    </td>
+
+                    {/* Customer */}
+                    <td className="py-4 px-4 sm:px-6 text-slate-700 whitespace-nowrap">
+                      {order.customerName}
+                    </td>
+
+                    {/* Date & Time */}
+                    <td className="py-4 px-4 sm:px-6 text-slate-600 whitespace-nowrap">
+                      {order.dateTime}
+                    </td>
+
+                    {/* Status Badge */}
+                    <td className="py-4 px-4 sm:px-6 text-center whitespace-nowrap">
+                      <OrderStatusBadge
+                        status={order.status}
+                        label={order.statusLabel}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <p className="text-sm font-bold text-slate-800">No orders yet</p>
-          <p className="text-xs text-slate-500">
-            Recent orders will be displayed here when you start selling on Errandify.
-          </p>
         </div>
       </div>
+
+      {/* Order Details Modal when clicking an order */}
+      <OrderDetailsModal
+        order={selectedOrder}
+        isOpen={!!selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+        onUpdateStatus={handleUpdateOrderStatus}
+      />
     </div>
   );
 };

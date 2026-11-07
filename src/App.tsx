@@ -7,17 +7,18 @@ import { ProductsListing } from './components/products/ProductsListing';
 import { ProductForm } from './components/products/ProductForm';
 import { ProductDetails } from './components/products/ProductDetails';
 import { OverviewView } from './components/dashboard/OverviewView';
+import { OrdersView } from './components/orders/OrdersView';
 import { DeleteModal } from './components/products/modals/DeleteModal';
 import { ArchiveModal } from './components/products/modals/ArchiveModal';
-import { Store, ShoppingCart, Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
+import { Store, Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
 
 type ProductSubView = 'list' | 'add' | 'view' | 'edit';
 
 function ErrandifyApp() {
   const toast = useToast();
 
-  // Navigation State
-  const [currentTab, setCurrentTab] = useState<string>('products');
+  // Navigation State - default to overview matching reference
+  const [currentTab, setCurrentTab] = useState<string>('overview');
   const [productSubView, setProductSubView] = useState<ProductSubView>('list');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
@@ -214,9 +215,8 @@ function ErrandifyApp() {
             setCurrentTab('products');
             setProductSubView('list');
           }}
-          onAddProduct={() => {
-            setCurrentTab('products');
-            handleNavigateToAddProduct();
+          onNavigateToOrders={() => {
+            setCurrentTab('orders');
           }}
         />
       )}
@@ -294,18 +294,8 @@ function ErrandifyApp() {
         </div>
       )}
 
-      {/* Tab 4: Orders Placeholder */}
-      {currentTab === 'orders' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-3">
-          <div className="w-14 h-14 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
-            <ShoppingCart className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Customer Orders</h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            Track customer orders, delivery status, and order dispatch through Errandify runners.
-          </p>
-        </div>
-      )}
+      {/* Tab 4: Orders */}
+      {currentTab === 'orders' && <OrdersView />}
 
       {/* Tab 5: Sales Placeholder */}
       {currentTab === 'sales' && (
