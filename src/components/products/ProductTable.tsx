@@ -149,8 +149,30 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                   </td>
 
                   {/* Price */}
-                  <td className="py-4 px-4 font-semibold text-slate-900 text-xs whitespace-nowrap">
-                    {priceDisplay.display}
+                  <td className="py-4 px-4 whitespace-nowrap">
+                    {priceDisplay.hasDiscount ? (
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-900 text-xs">
+                            {priceDisplay.display}
+                          </span>
+                          {priceDisplay.discountPercentage && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                              -{priceDisplay.discountPercentage}%
+                            </span>
+                          )}
+                        </div>
+                        {priceDisplay.originalDisplay && (
+                          <span className="text-[11px] text-slate-400 line-through font-normal">
+                            {priceDisplay.originalDisplay}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="font-semibold text-slate-900 text-xs">
+                        {priceDisplay.display}
+                      </span>
+                    )}
                   </td>
 
                   {/* Stock */}

@@ -24,6 +24,25 @@ export const CombinationsTable: React.FC<CombinationsTableProps> = ({
     onChange(updated);
   };
 
+  const handleDiscountPriceChange = (id: string, value: string) => {
+    const cleaned = value.replace(/[^0-9]/g, '');
+    if (cleaned === '') {
+      const updated = combinations.map((c) => {
+        if (c.id !== id) return c;
+        const copy = { ...c };
+        delete copy.discountPrice;
+        return copy;
+      });
+      onChange(updated);
+      return;
+    }
+    const num = Math.max(0, parseInt(cleaned, 10));
+    const updated = combinations.map((c) =>
+      c.id === id ? { ...c, discountPrice: num } : c
+    );
+    onChange(updated);
+  };
+
   const handleStockChange = (id: string, value: string) => {
     const num = Math.max(0, parseInt(value.replace(/[^0-9]/g, ''), 10) || 0);
     const updated = combinations.map((c) => (c.id === id ? { ...c, stockQuantity: num } : c));
@@ -149,98 +168,146 @@ export const CombinationsTable: React.FC<CombinationsTableProps> = ({
             <thead className="sticky top-0 bg-[#5E17EB] text-white z-10 font-semibold shadow-xs">
               <tr>
                 <th className="py-3 px-4">Combination</th>
-                <th className="py-3 px-4 w-44">Price (₦)</th>
-                <th className="py-3 px-4 w-36">Quantity</th>
-                <th className="py-3 px-4 w-32 text-center">Availability</th>
+                <th className="py-3 px-4 w-40">Price (₦)</th>
+                <th className="py-3 px-4 w-44">Discount Price (Optional)</th>
+                <th className="py-3 px-4 w-32">Quantity</th>
+                <th className="py-3 px-4 w-28 text-center">Availability</th>
                 <th className="py-3 px-4 w-16 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredCombinations.map((comb) => (
-                <tr
-                  key={comb.id}
-                  className={`hover:bg-slate-50/80 transition-colors ${
-                    !comb.isAvailable ? 'opacity-60 bg-slate-50/40' : ''
-                  }`}
-                >
-                  {/* Combination Label */}
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-800 text-xs">
-                        {comb.title}
-                      </span>
-                      {!comb.isAvailable && (
-                        <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-medium">
-                          Disabled
+              {filteredCombinations.map((comb) => {
+                const hasDiscountErr =
+                  comb.discountPrice !== undefined &&
+                  (comb.discountPrice <= 0 || comb.discountPrice >= comb.price);
+                const discountErrMsg =
+                  comb.discountPrice !== undefined
+                    ? comb.discountPrice <= 0
+                      ? 'Must be > ₦0'
+                      : comb.discountPrice === comb.price
+                      ? 'Cannot equal normal price'
+                      : comb.discountPrice > comb.price
+                      ? 'Must be lower than normal price'
+                      : ''
+                    : '';
+
+                return (
+                  <tr
+                    key={comb.id}
+                    className={`hover:bg-slate-50/80 transition-colors ${
+                      !comb.isAvailable ? 'opacity-60 bg-slate-50/40' : ''
+                    }`}
+                  >
+                    {/* Combination Label */}
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-800 text-xs">
+                          {comb.title}
                         </span>
+                        {!comb.isAvailable && (
+                          <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Price Input */}
+                    <td className="py-2 px-4 align-top">
+                      <div className="relative flex items-center">
+                        <span className="absolute left-2.5 text-slate-400 font-semibold text-xs">
+                          ₦
+                        </span>
+                        <input
+                          type="text"
+                          value={comb.price ? comb.price.toLocaleString() : ''}
+                          onChange={(e) => handlePriceChange(comb.id, e.target.value)}
+                          placeholder="0"
+                          className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
+                        />
+                      </div>
+                    </td>
+
+                    {/* Discount Price (Optional) Input */}
+                    <td className="py-2 px-4 align-top">
+                      <div className="relative flex items-center">
+                        <span className="absolute left-2.5 text-slate-400 font-semibold text-xs">
+                          ₦
+                        </span>
+                        <input
+                          type="text"
+                          value={
+                            comb.discountPrice !== undefined
+                              ? comb.discountPrice.toLocaleString()
+                              : ''
+                          }
+                          onChange={(e) =>
+                            handleDiscountPriceChange(comb.id, e.target.value)
+                          }
+                          placeholder="Enter discounted price"
+                          className={`w-full pl-6 pr-2 py-1.5 border rounded-lg text-xs font-semibold text-slate-800 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-colors ${
+                            hasDiscountErr
+                              ? 'border-red-400 bg-red-50/30 focus:ring-red-200'
+                              : 'border-slate-200 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]'
+                          }`}
+                        />
+                      </div>
+                      {hasDiscountErr && (
+                        <p className="text-[10px] text-red-600 mt-1 font-medium">
+                          {discountErrMsg}
+                        </p>
                       )}
-                    </div>
-                  </td>
+                    </td>
 
-                  {/* Price Input */}
-                  <td className="py-2 px-4">
-                    <div className="relative flex items-center">
-                      <span className="absolute left-2.5 text-slate-400 font-semibold text-xs">
-                        ₦
-                      </span>
+                    {/* Stock Input */}
+                    <td className="py-2 px-4 align-top">
                       <input
-                        type="text"
-                        value={comb.price ? comb.price.toLocaleString() : ''}
-                        onChange={(e) => handlePriceChange(comb.id, e.target.value)}
+                        type="number"
+                        min="0"
+                        value={comb.stockQuantity}
+                        onChange={(e) => handleStockChange(comb.id, e.target.value)}
                         placeholder="0"
-                        className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
                       />
-                    </div>
-                  </td>
+                    </td>
 
-                  {/* Stock Input */}
-                  <td className="py-2 px-4">
-                    <input
-                      type="number"
-                      min="0"
-                      value={comb.stockQuantity}
-                      onChange={(e) => handleStockChange(comb.id, e.target.value)}
-                      placeholder="0"
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
-                    />
-                  </td>
-
-                  {/* Availability Toggle */}
-                  <td className="py-2 px-4 text-center">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleAvailable(comb.id)}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        comb.isAvailable ? 'bg-[#5E17EB]' : 'bg-slate-300'
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                          comb.isAvailable ? 'translate-x-4' : 'translate-x-0'
+                    {/* Availability Toggle */}
+                    <td className="py-2 px-4 text-center align-top pt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAvailable(comb.id)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          comb.isAvailable ? 'bg-[#5E17EB]' : 'bg-slate-300'
                         }`}
-                      />
-                    </button>
-                  </td>
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                            comb.isAvailable ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </td>
 
-                  {/* Remove Button */}
-                  <td className="py-2 px-4 text-center">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onRequestDelete) {
-                          onRequestDelete(comb);
-                        } else {
-                          onChange(combinations.filter((c) => c.id !== comb.id));
-                        }
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
-                      title="Remove combination"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    {/* Remove Button */}
+                    <td className="py-2 px-4 text-center align-top pt-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onRequestDelete) {
+                            onRequestDelete(comb);
+                          } else {
+                            onChange(combinations.filter((c) => c.id !== comb.id));
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
+                        title="Remove combination"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

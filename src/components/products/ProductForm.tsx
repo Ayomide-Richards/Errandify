@@ -44,6 +44,9 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [price, setPrice] = useState<string>(
     initialProduct?.price !== undefined ? initialProduct.price.toString() : ''
   );
+  const [discountPrice, setDiscountPrice] = useState<string>(
+    initialProduct?.discountPrice !== undefined ? initialProduct.discountPrice.toString() : ''
+  );
   const [stockQuantity, setStockQuantity] = useState<string>(
     initialProduct?.stockQuantity !== undefined ? initialProduct.stockQuantity.toString() : ''
   );
@@ -77,6 +80,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     productType,
     unitOfSale,
     price,
+    discountPrice,
     stockQuantity,
     options,
     combinations,
@@ -101,6 +105,24 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     }
   };
 
+  const validateDiscountPrice = (dpStr: string, priceStr: string): string => {
+    if (dpStr.trim() === '') return '';
+    const dp = parseFloat(dpStr);
+    if (isNaN(dp) || dp <= 0) {
+      return 'Discount price must be a valid positive amount greater than ₦0';
+    }
+    const p = parseFloat(priceStr);
+    if (!isNaN(p) && p > 0) {
+      if (dp === p) {
+        return 'Discount price cannot equal the normal price';
+      }
+      if (dp > p) {
+        return 'Discount price must be lower than the normal price';
+      }
+    }
+    return '';
+  };
+
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
 
@@ -122,6 +144,11 @@ export const ProductForm: React.FC<ProductFormProps> = ({
       const p = parseFloat(price);
       if (!price || isNaN(p) || p <= 0) {
         newErrors.price = 'Please enter a valid price greater than ₦0';
+      }
+
+      const dpError = validateDiscountPrice(discountPrice, price);
+      if (dpError) {
+        newErrors.discountPrice = dpError;
       }
 
       const q = parseInt(stockQuantity, 10);
@@ -149,6 +176,22 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         const invalidPrices = combinations.filter((c) => c.isAvailable && (!c.price || c.price <= 0));
         if (invalidPrices.length > 0) {
           newErrors.combinations = `Please enter a valid price for combination "${invalidPrices[0].title}"`;
+        } else {
+          const invalidDiscounts = combinations.filter(
+            (c) =>
+              c.discountPrice !== undefined &&
+              (isNaN(c.discountPrice) || c.discountPrice <= 0 || c.discountPrice >= c.price)
+          );
+          if (invalidDiscounts.length > 0) {
+            const bad = invalidDiscounts[0];
+            if (bad.discountPrice !== undefined && bad.discountPrice <= 0) {
+              newErrors.combinations = `Discount price for "${bad.title}" must be greater than ₦0`;
+            } else if (bad.discountPrice === bad.price) {
+              newErrors.combinations = `Discount price for "${bad.title}" cannot equal its normal price`;
+            } else {
+              newErrors.combinations = `Discount price for "${bad.title}" must be lower than its normal price`;
+            }
+          }
         }
       }
     }
@@ -184,6 +227,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
       if (productType === 'individual') {
         payload.unitOfSale = unitOfSale;
         payload.price = parseFloat(price);
+        payload.discountPrice = discountPrice.trim() !== '' ? parseFloat(discountPrice) : undefined;
         payload.stockQuantity = parseInt(stockQuantity, 10);
       } else {
         payload.options = options;
@@ -488,7 +532,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Unit of Sale */}
               <div data-error={!!errors.unitOfSale}>
                 <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -538,8 +582,15 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                     placeholder="2500"
                     value={price}
                     onChange={(e) => {
-                      setPrice(e.target.value);
-                      if (errors.price) setErrors((prev) => ({ ...prev, price: '' }));
+                      const newPrice = e.target.value;
+                      setPrice(newPrice);
+                      setErrors((prev) => ({
+                        ...prev,
+                        price: '',
+                        discountPrice: discountPrice.trim()
+                          ? validateDiscountPrice(discountPrice, newPrice)
+                          : '',
+                      }));
                     }}
                     className={`w-full pl-8 pr-3.5 py-2.5 text-sm bg-white border rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 font-medium transition-all ${
                       errors.price
@@ -552,6 +603,43 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                   <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5" />
                     {errors.price}
+                  </p>
+                )}
+              </div>
+
+              {/* Discount Price (Optional) */}
+              <div data-error={!!errors.discountPrice}>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Discount Price <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <div className="relative flex items-center">
+                  <span className="absolute left-3.5 text-slate-500 font-semibold text-sm">₦</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Enter discounted price"
+                    value={discountPrice}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDiscountPrice(val);
+                      const err = validateDiscountPrice(val, price);
+                      setErrors((prev) => ({ ...prev, discountPrice: err }));
+                    }}
+                    className={`w-full pl-8 pr-3.5 py-2.5 text-sm bg-white border rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 font-medium transition-all ${
+                      errors.discountPrice
+                        ? 'border-red-400 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-[#5E17EB] focus:ring-[#5E17EB]/20'
+                    }`}
+                  />
+                </div>
+                {errors.discountPrice ? (
+                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{errors.discountPrice}</span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Set a lower price when you want to offer this product at a discount. Leave empty if no discount applies.
                   </p>
                 )}
               </div>

@@ -180,6 +180,10 @@ export const ProductStorage = {
       updatedAt: new Date().toISOString(),
     };
 
+    if ('discountPrice' in updates && updates.discountPrice === undefined) {
+      delete updatedProduct.discountPrice;
+    }
+
     list[index] = updatedProduct;
     this.saveProducts(list);
     return updatedProduct;

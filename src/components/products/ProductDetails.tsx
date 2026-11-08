@@ -207,12 +207,26 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
             {/* Price */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Price</span>
-              <p className="text-xl font-bold text-slate-900 mt-1">
-                {priceInfo.display}
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-slate-500">Price</span>
+                {priceInfo.hasDiscount && priceInfo.discountPercentage && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {priceInfo.discountPercentage}% OFF
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 flex items-baseline gap-2 flex-wrap">
+                <p className="text-xl font-bold text-slate-900">
+                  {priceInfo.display}
+                </p>
+                {priceInfo.hasDiscount && priceInfo.originalDisplay && (
+                  <span className="text-sm font-medium text-slate-400 line-through">
+                    {priceInfo.originalDisplay}
+                  </span>
+                )}
+              </div>
               {product.productType === 'with_options' && (
-                <span className="text-[11px] text-slate-400">Across combinations</span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">Across combinations</span>
               )}
             </div>
 
@@ -382,7 +396,20 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                       {comb.title}
                     </td>
                     <td className="py-3 px-4 font-medium text-slate-900">
-                      {formatNaira(comb.price)}
+                      {comb.discountPrice &&
+                      comb.discountPrice > 0 &&
+                      comb.discountPrice < comb.price ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-slate-900">
+                            {formatNaira(comb.discountPrice)}
+                          </span>
+                          <span className="text-slate-400 line-through font-normal text-[11px]">
+                            {formatNaira(comb.price)}
+                          </span>
+                        </div>
+                      ) : (
+                        formatNaira(comb.price)
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span className="font-semibold text-slate-800">
