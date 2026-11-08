@@ -14,7 +14,6 @@ import {
   Edit,
   Eye,
   EyeOff,
-  Archive,
   Trash2,
   Copy,
   Check,
@@ -29,7 +28,6 @@ interface ProductDetailsProps {
   onBack: () => void;
   onEdit: () => void;
   onTogglePublish: () => void;
-  onArchive: () => void;
   onDelete: () => void;
 }
 
@@ -38,7 +36,6 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
   onBack,
   onEdit,
   onTogglePublish,
-  onArchive,
   onDelete,
 }) => {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -138,16 +135,6 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                   onClick={() => setShowMenu(false)}
                 />
                 <div className="absolute right-0 top-full mt-1.5 w-48 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-30 animate-in fade-in zoom-in-95">
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      onArchive();
-                    }}
-                    className="w-full px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 text-left"
-                  >
-                    <Archive className="w-3.5 h-3.5 text-slate-500" />
-                    Archive Product
-                  </button>
                   <button
                     onClick={() => {
                       setShowMenu(false);

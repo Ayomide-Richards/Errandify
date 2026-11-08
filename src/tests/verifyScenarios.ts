@@ -31,7 +31,6 @@ const rice1kg = ProductStorage.createProduct({
   price: 2500,
   stockQuantity: 45,
   isPublished: true,
-  isArchived: false,
 });
 console.log(`[PASS] Created 1kg rice: ID ${rice1kg.id}, Price ₦${rice1kg.price}, Stock: ${rice1kg.stockQuantity} ${rice1kg.unitOfSale}`);
 
@@ -47,7 +46,6 @@ const rice5kg = ProductStorage.createProduct({
   price: 12000,
   stockQuantity: 20,
   isPublished: true,
-  isArchived: false,
 });
 console.log(`[PASS] Created 5kg rice: ID ${rice5kg.id}, Price ₦${rice5kg.price}, Stock: ${rice5kg.stockQuantity} ${rice5kg.unitOfSale}`);
 
@@ -94,7 +92,6 @@ const shoeProduct = ProductStorage.createProduct({
   ],
   combinations,
   isPublished: true,
-  isArchived: false,
 });
 
 console.log(`[PASS] Created Shoe product with options: ${shoeProduct.name}`);
@@ -134,7 +131,6 @@ const draftProduct = ProductStorage.createProduct({
   price: 28000,
   stockQuantity: 15,
   isPublished: false,
-  isArchived: false,
 });
 console.log(`[PASS] Created unpublished product: ID ${draftProduct.id}, isPublished: ${draftProduct.isPublished}`);
 

@@ -10,7 +10,6 @@ import {
   Eye,
   Edit,
   EyeOff,
-  Archive,
   Trash2,
   Package,
   Layers,
@@ -24,7 +23,6 @@ interface ProductTableProps {
   onViewProduct: (product: Product) => void;
   onEditProduct: (product: Product) => void;
   onTogglePublish: (product: Product) => void;
-  onArchiveProduct: (product: Product) => void;
   onDeleteProduct: (product: Product) => void;
 }
 
@@ -36,7 +34,6 @@ export const ProductTable: React.FC<ProductTableProps> = ({
   onViewProduct,
   onEditProduct,
   onTogglePublish,
-  onArchiveProduct,
   onDeleteProduct,
 }) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -236,18 +233,6 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                                 Publish
                               </>
                             )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              onArchiveProduct(product);
-                            }}
-                            className="w-full px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
-                          >
-                            <Archive className="w-3.5 h-3.5 text-slate-400" />
-                            Archive
                           </button>
 
                           <div className="my-1 border-t border-slate-100" />

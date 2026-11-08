@@ -44,7 +44,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-800 leading-relaxed">
               <strong className="font-semibold block mb-0.5">Business Rule Notice</strong>
-              One or more products may have historical order records. According to platform rules, permanent deletion is restricted. Consider <strong>Archiving</strong> instead to preserve order records.
+              One or more products may have historical order records. According to platform rules, permanent deletion may be restricted in order to preserve order records.
             </div>
           </div>
         ) : (

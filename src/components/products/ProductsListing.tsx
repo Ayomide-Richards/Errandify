@@ -593,19 +593,6 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
           setDeleteModalState({ isOpen: false, productIds: [] });
         }}
       />
-
-      {/* Archive Confirmation Modal */}
-      <ArchiveModal
-        isOpen={archiveModalState.isOpen}
-        onClose={() => setArchiveModalState({ isOpen: false })}
-        productName={archiveModalState.productName}
-        onConfirm={() => {
-          if (archiveModalState.productId) {
-            onArchiveProduct(archiveModalState.productId);
-          }
-          setArchiveModalState({ isOpen: false });
-        }}
-      />
     </div>
   );
 };

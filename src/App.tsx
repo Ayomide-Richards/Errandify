@@ -148,10 +148,6 @@ function ErrandifyApp() {
     }
   };
 
-  const handleArchive = (_id: string) => {
-    // Archive functionality removed
-  };
-
   const handleDelete = (id: string) => {
     try {
       const p = products.find((x) => x.id === id);
@@ -177,10 +173,6 @@ function ErrandifyApp() {
     } catch (err: any) {
       toast.error('Bulk delete failed', err?.message);
     }
-  };
-
-  const handleResetData = () => {
-    // Removed - replaced by Add Promotion flow
   };
 
   const handleToastFromPanel = (type: 'success' | 'info' | 'error', title: string, message?: string) => {
@@ -351,8 +343,6 @@ function ErrandifyApp() {
           }}
         />
       )}
-
-      {/* Global Archive Modal for Detail view - removed */}
     </DashboardLayout>
   );
 }
