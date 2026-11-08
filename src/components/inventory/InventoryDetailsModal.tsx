@@ -140,8 +140,6 @@ export const InventoryDetailsModal: React.FC<InventoryDetailsModalProps> = ({
             </div>
             <p className="text-xs text-slate-500 mt-1">
               {product.category}
-              {product.subcategory ? ` · ${product.subcategory}` : ''} · ID:{' '}
-              <span className="font-mono text-slate-700">{product.id}</span>
             </p>
           </div>
         </div>

@@ -24,16 +24,12 @@ import { useToast } from '../common/Toast';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { InventoryDetailsModal } from './InventoryDetailsModal';
 import { StockHistoryModal } from './StockHistoryModal';
-import { OrderStockSafeguardModal } from './OrderStockSafeguardModal';
 import {
   Search,
   X,
   Package,
   Layers,
-  SlidersHorizontal,
   Clock,
-  ShieldCheck,
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
   ChevronLeft,
@@ -96,7 +92,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const [detailsProductId, setDetailsProductId] = useState<string | null>(null);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
-  const [safeguardModalOpen, setSafeguardModalOpen] = useState(false);
 
   const refreshAll = () => {
     onRefreshProducts();
@@ -135,17 +130,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const filteredProducts = useMemo(() => {
     return products
       .filter((p) => {
-        // Search by product name, ID, SKU, or combination title
+        // Search by product name, category, or combination title
         if (filters.search.trim()) {
           const q = filters.search.toLowerCase();
           const matchName = p.name.toLowerCase().includes(q);
-          const matchId = p.id.toLowerCase().includes(q);
-          const matchSku = p.sku?.toLowerCase().includes(q);
           const matchCat = p.category.toLowerCase().includes(q);
           const matchComb = p.combinations?.some((c) =>
             c.title.toLowerCase().includes(q)
           );
-          if (!matchName && !matchId && !matchSku && !matchCat && !matchComb) {
+          if (!matchName && !matchCat && !matchComb) {
             return false;
           }
         }
@@ -327,37 +320,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            onClick={() => setSafeguardModalOpen(true)}
-            className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl hover:bg-slate-100 border border-slate-200 bg-white transition-colors font-medium shadow-2xs"
-            title="Test order & checkout stock validation safeguards"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            Order Stock Check
-          </button>
-
-          <button
-            type="button"
             onClick={() => setHistoryModalOpen(true)}
             className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl hover:bg-slate-100 border border-slate-200 bg-white transition-colors font-medium shadow-2xs"
           >
             <Clock className="w-4 h-4 text-[#5E17EB]" />
             Stock History ({history.length})
           </button>
-
-          <Button
-            variant="primary"
-            onClick={() =>
-              setAdjustModalState({
-                isOpen: true,
-                productId: products[0]?.id || null,
-                initialType: 'add',
-              })
-            }
-            leftIcon={<SlidersHorizontal className="w-4 h-4" />}
-            className="shadow-sm font-semibold"
-          >
-            Adjust Stock
-          </Button>
         </div>
       </div>
 
@@ -479,87 +447,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       </div>
 
-      {/* Consolidated Low-Stock & Out-of-Stock Alert Banner */}
-      {(metrics.lowStockProducts > 0 ||
-        metrics.outOfStockProducts > 0 ||
-        metrics.lowStockCombinationsCount > 0 ||
-        metrics.outOfStockCombinationsCount > 0) && (
-        <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-            <div className="text-xs space-y-0.5">
-              <p className="font-bold text-slate-900">
-                Restock Attention Needed
-              </p>
-              <p className="text-slate-600">
-                {metrics.outOfStockProducts > 0 && (
-                  <span>
-                    <strong className="text-red-700">
-                      {metrics.outOfStockProducts}{' '}
-                      {metrics.outOfStockProducts === 1 ? 'product is' : 'products are'}{' '}
-                      Out of Stock
-                    </strong>
-                    .{' '}
-                  </span>
-                )}
-                {metrics.lowStockProducts > 0 && (
-                  <span>
-                    <strong className="text-amber-800">
-                      {metrics.lowStockProducts}{' '}
-                      {metrics.lowStockProducts === 1 ? 'product is' : 'products are'}{' '}
-                      running Low on Stock
-                    </strong>
-                    .{' '}
-                  </span>
-                )}
-                {(metrics.lowStockCombinationsCount > 0 ||
-                  metrics.outOfStockCombinationsCount > 0) && (
-                  <span>
-                    Across option-based products,{' '}
-                    <strong className="text-slate-800">
-                      {metrics.outOfStockCombinationsCount} variant{' '}
-                      {metrics.outOfStockCombinationsCount === 1
-                        ? 'combination is'
-                        : 'combinations are'}{' '}
-                      out of stock
-                    </strong>{' '}
-                    and{' '}
-                    <strong className="text-slate-800">
-                      {metrics.lowStockCombinationsCount}{' '}
-                      {metrics.lowStockCombinationsCount === 1 ? 'is' : 'are'} low on stock
-                    </strong>
-                    .
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-            <button
-              type="button"
-              onClick={() => {
-                setFilters((prev) => ({
-                  ...prev,
-                  stockStatus:
-                    prev.stockStatus === 'out_of_stock'
-                      ? 'low_stock'
-                      : 'out_of_stock',
-                }));
-                setCurrentPage(1);
-              }}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100/60 transition-colors"
-            >
-              {filters.stockStatus === 'out_of_stock'
-                ? 'Filter Low Stock'
-                : 'Filter Out of Stock'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Search, Filters & Sort Controls */}
       <div className="space-y-3">
         {/* Search Input */}
@@ -567,7 +454,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search by product name, product ID, or variant option..."
+            placeholder="Search by product name, category, or option..."
             value={filters.search}
             onChange={(e) => {
               setFilters((prev) => ({ ...prev, search: e.target.value }));
@@ -667,13 +554,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <table className="w-full text-left border-collapse">
               <thead className="bg-[#5E17EB] text-white">
                 <tr className="text-xs font-semibold select-none">
-                  <th className="py-3.5 px-4">Product</th>
-                  <th className="py-3.5 px-4">Category</th>
-                  <th className="py-3.5 px-4">Available Stock</th>
-                  <th className="py-3.5 px-4">Low-Stock Threshold</th>
-                  <th className="py-3.5 px-4 text-center">Stock Status</th>
-                  <th className="py-3.5 px-4">Last Stock Update</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
+                  <th className="py-3.5 pl-4 pr-2.5 xl:px-4">Product</th>
+                  <th className="py-3.5 px-2.5 xl:px-3.5">Category</th>
+                  <th className="py-3.5 px-2.5 xl:px-3.5 whitespace-nowrap">Available Stock</th>
+                  <th className="py-3.5 px-2.5 xl:px-3.5 whitespace-nowrap">Low-Stock Alert</th>
+                  <th className="py-3.5 px-2.5 xl:px-3.5 text-center whitespace-nowrap">Stock Status</th>
+                  <th className="py-3.5 px-2.5 xl:px-3.5 whitespace-nowrap">Last Updated</th>
+                  <th className="py-3.5 pl-2.5 pr-4 xl:px-4 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
 
@@ -698,10 +585,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         onClick={() => setDetailsProductId(product.id)}
                         className="group hover:bg-[#F8F9FE] transition-colors cursor-pointer"
                       >
-                        {/* Product Image, Name, ID & Combination Alerts */}
-                        <td className="py-4 px-4 min-w-[270px]">
-                          <div className="flex items-start gap-3">
-                            <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center mt-0.5">
+                        {/* Product Image, Name & Combination Alerts */}
+                        <td className="py-3.5 pl-4 pr-2.5 xl:px-4 max-w-[220px] xl:max-w-[280px]">
+                          <div className="flex items-start gap-2.5 xl:gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center mt-0.5">
                               {primaryImg ? (
                                 <img
                                   src={primaryImg.url}
@@ -714,22 +601,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </div>
 
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-semibold text-slate-900 group-hover:text-[#5E17EB] transition-colors truncate">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p
+                                  className="font-semibold text-slate-900 group-hover:text-[#5E17EB] transition-colors truncate max-w-full"
+                                  title={product.name}
+                                >
                                   {product.name}
                                 </p>
                                 {!product.isPublished && (
-                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 shrink-0">
                                     Unpublished
                                   </span>
                                 )}
                               </div>
 
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-                                <span className="font-mono text-[11px] text-slate-400">
-                                  ID: {product.id}
-                                </span>
-                                <span>·</span>
                                 {isWithOptions ? (
                                   <button
                                     type="button"
@@ -747,7 +633,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                     )}
                                   </button>
                                 ) : (
-                                  <span className="text-[11px]">
+                                  <span className="text-[11px] truncate">
                                     Unit: {product.unitOfSale || 'Standard'}
                                   </span>
                                 )}
@@ -758,20 +644,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                 combBreakdown &&
                                 (combBreakdown.outOfStockCount > 0 ||
                                   combBreakdown.lowStockCount > 0) && (
-                                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                  <div className="flex flex-wrap items-center gap-1 mt-1.5">
                                     {combBreakdown.outOfStockCount > 0 && (
                                       <span
-                                        className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200"
+                                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200"
                                         title={`Out of stock: ${combBreakdown.outOfStockTitles.join(', ')}`}
                                       >
                                         {combBreakdown.outOfStockCount} option
                                         {combBreakdown.outOfStockCount === 1 ? '' : 's'} out
-                                        of stock ({combBreakdown.outOfStockTitles.slice(0, 2).join(', ')})
+                                        of stock
                                       </span>
                                     )}
                                     {combBreakdown.lowStockCount > 0 && (
                                       <span
-                                        className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200"
+                                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200"
                                         title={`Low stock: ${combBreakdown.lowStockTitles.join(', ')}`}
                                       >
                                         {combBreakdown.lowStockCount} option
@@ -786,18 +672,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </td>
 
                         {/* Category */}
-                        <td className="py-4 px-4 text-slate-600 text-xs font-medium whitespace-nowrap">
-                          <span className="block text-slate-800">{product.category}</span>
-                          {product.subcategory && (
-                            <span className="text-[11px] text-slate-400">
-                              {product.subcategory}
-                            </span>
-                          )}
+                        <td className="py-3.5 px-2.5 xl:px-3.5 text-slate-700 text-xs font-medium max-w-[130px]">
+                          <span className="block text-slate-800 truncate" title={product.category}>
+                            {product.category}
+                          </span>
                         </td>
 
                         {/* Available Stock Quantity */}
-                        <td className="py-4 px-4 whitespace-nowrap">
-                          <div className="flex items-baseline gap-1.5">
+                        <td className="py-3.5 px-2.5 xl:px-3.5 whitespace-nowrap">
+                          <div className="flex items-baseline gap-1">
                             <span
                               className={`text-sm font-extrabold ${
                                 stock <= 0
@@ -824,7 +707,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                         {/* Low-Stock Threshold */}
                         <td
-                          className="py-4 px-4 text-xs whitespace-nowrap"
+                          className="py-3.5 px-2.5 xl:px-3.5 text-xs whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {inlineThresholdProductId === product.id ? (
@@ -837,7 +720,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                 onChange={(e) =>
                                   setInlineThresholdValue(e.target.value)
                                 }
-                                className="w-16 px-2 py-1 text-xs font-bold bg-white border border-[#5E17EB] rounded-lg text-slate-900 focus:outline-none"
+                                className="w-14 px-2 py-1 text-xs font-bold bg-white border border-[#5E17EB] rounded-lg text-slate-900 focus:outline-none"
                               />
                               <button
                                 type="button"
@@ -863,7 +746,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                 setInlineThresholdProductId(product.id);
                                 setInlineThresholdValue(threshold.toString());
                               }}
-                              className="inline-flex items-center gap-1.5 text-slate-700 hover:text-[#5E17EB] font-medium px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+                              className="inline-flex items-center gap-1 text-slate-700 hover:text-[#5E17EB] font-medium px-1.5 py-1 rounded-lg hover:bg-slate-100 transition-colors"
                               title="Click to update low-stock threshold"
                             >
                               <span>
@@ -875,21 +758,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </td>
 
                         {/* Stock Status */}
-                        <td className="py-4 px-4 text-center whitespace-nowrap">
+                        <td className="py-3.5 px-2.5 xl:px-3.5 text-center whitespace-nowrap">
                           <AvailabilityBadge status={status} />
                         </td>
 
                         {/* Last Stock Update */}
-                        <td className="py-4 px-4 text-xs text-slate-500 whitespace-nowrap">
+                        <td className="py-3.5 px-2.5 xl:px-3.5 text-xs text-slate-500 whitespace-nowrap">
                           {formatDate(product.lastStockUpdate || product.updatedAt)}
                         </td>
 
                         {/* Actions */}
                         <td
-                          className="py-4 px-4 text-right whitespace-nowrap"
+                          className="py-3.5 pl-2.5 pr-4 xl:px-4 text-right whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="inline-flex items-center justify-end gap-2">
+                          <div className="inline-flex items-center justify-end gap-1.5">
                             <Button
                               type="button"
                               variant="purple-light"
@@ -908,7 +791,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <button
                               type="button"
                               onClick={() => setDetailsProductId(product.id)}
-                              className="p-2 rounded-lg text-slate-400 hover:text-[#5E17EB] hover:bg-[#F3EFFE] transition-colors"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#5E17EB] hover:bg-[#F3EFFE] transition-colors"
                               title="View product inventory details & history"
                             >
                               <Eye className="w-4 h-4" />
@@ -1117,20 +1000,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         isOpen={historyModalOpen}
         onClose={() => setHistoryModalOpen(false)}
         history={history}
-      />
-
-      {/* Order & Checkout Stock Safeguard Modal */}
-      <OrderStockSafeguardModal
-        isOpen={safeguardModalOpen}
-        onClose={() => setSafeguardModalOpen(false)}
-        products={products}
-        onOrderConfirmed={(orderNumber) => {
-          refreshAll();
-          toast.success(
-            `Order ${orderNumber} stock deducted`,
-            'Stock availability was verified at checkout and deducted once.'
-          );
-        }}
       />
     </div>
   );

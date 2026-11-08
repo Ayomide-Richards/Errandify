@@ -234,7 +234,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
             <div className="min-w-0">
               <p className="text-sm font-bold text-slate-900 truncate">{product.name}</p>
               <p className="text-xs text-slate-500 truncate">
-                {product.category} · ID: <span className="font-mono">{product.id}</span>
+                {product.category}
               </p>
             </div>
           </div>
