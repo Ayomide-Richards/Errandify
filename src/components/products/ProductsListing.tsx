@@ -10,7 +10,6 @@ import { ProductTable } from './ProductTable';
 import { Button } from '../common/Button';
 import { UnpublishModal } from './modals/UnpublishModal';
 import { DeleteModal } from './modals/DeleteModal';
-import { ArchiveModal } from './modals/ArchiveModal';
 import {
   Plus,
   Search,
@@ -21,7 +20,7 @@ import {
   Trash2,
   EyeOff,
   Eye,
-  RotateCcw,
+  Tag,
 } from 'lucide-react';
 
 interface ProductsListingProps {
@@ -32,10 +31,9 @@ interface ProductsListingProps {
   onTogglePublish: (id: string) => void;
   onBulkUnpublish: (ids: string[]) => void;
   onBulkPublish: (ids: string[]) => void;
-  onArchiveProduct: (id: string) => void;
   onDeleteProduct: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
-  onResetData?: () => void;
+  onOpenPromotions: () => void;
 }
 
 export const ProductsListing: React.FC<ProductsListingProps> = ({
@@ -46,10 +44,9 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
   onTogglePublish,
   onBulkUnpublish,
   onBulkPublish,
-  onArchiveProduct,
   onDeleteProduct,
   onBulkDelete,
-  onResetData,
+  onOpenPromotions,
 }) => {
   // Filters State
   const [filters, setFilters] = useState<ProductFilters>({
@@ -81,19 +78,12 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
     hasOrderHistory?: boolean;
   }>({ isOpen: false, productIds: [] });
 
-  const [archiveModalState, setArchiveModalState] = useState<{
-    isOpen: boolean;
-    productId?: string;
-    productName?: string;
-  }>({ isOpen: false });
-
   // Summary Metrics
   const metrics = useMemo(() => calculateSummaryMetrics(products), [products]);
 
-  // Active (non-archived) products filtering & sorting
+  // Active products filtering & sorting
   const filteredProducts = useMemo(() => {
     return products
-      .filter((p) => !p.isArchived)
       .filter((p) => {
         // Search filter
         if (filters.search.trim()) {
@@ -216,16 +206,14 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          {onResetData && (
-            <button
-              onClick={onResetData}
-              className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors"
-              title="Reset store products to initial mock dataset"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset Data
-            </button>
-          )}
+          <button
+            onClick={onOpenPromotions}
+            className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-slate-100 border border-slate-200 bg-white transition-colors font-medium shadow-2xs"
+            title="Manage store promotions and discounts"
+          >
+            <Tag className="w-3.5 h-3.5" />
+            Add Promotion
+          </button>
 
           <Button
             variant="primary"
@@ -462,13 +450,6 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
             } else {
               onTogglePublish(p.id);
             }
-          }}
-          onArchiveProduct={(p) => {
-            setArchiveModalState({
-              isOpen: true,
-              productId: p.id,
-              productName: p.name,
-            });
           }}
           onDeleteProduct={(p) => {
             setDeleteModalState({

@@ -115,3 +115,4 @@ export const SALES_TREND_DATA: Record<string, SalesPeriodData> = {
     ],
   },
 };
+

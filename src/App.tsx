@@ -9,10 +9,10 @@ import { ProductDetails } from './components/products/ProductDetails';
 import { OverviewView } from './components/dashboard/OverviewView';
 import { OrdersView } from './components/orders/OrdersView';
 import { DeleteModal } from './components/products/modals/DeleteModal';
-import { ArchiveModal } from './components/products/modals/ArchiveModal';
+import { PromotionsPanel } from './components/promotions/PromotionsPanel';
 import { Store, Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
 
-type ProductSubView = 'list' | 'add' | 'view' | 'edit';
+type ProductSubView = 'list' | 'add' | 'view' | 'edit' | 'promotions';
 
 function ErrandifyApp() {
   const toast = useToast();
@@ -27,7 +27,6 @@ function ErrandifyApp() {
 
   // Modals triggered from Details or other places
   const [modalDeleteId, setModalDeleteId] = useState<string | null>(null);
-  const [modalArchiveId, setModalArchiveId] = useState<string | null>(null);
 
   // Load products on mount
   useEffect(() => {
@@ -149,18 +148,8 @@ function ErrandifyApp() {
     }
   };
 
-  const handleArchive = (id: string) => {
-    try {
-      const p = products.find((x) => x.id === id);
-      ProductStorage.archiveProduct(id);
-      refreshProducts();
-      toast.info(`"${p?.name || 'Product'}" archived`, 'Product removed from active listings.');
-      if (selectedProductId === id) {
-        setProductSubView('list');
-      }
-    } catch (err: any) {
-      toast.error('Archive failed', err?.message);
-    }
+  const handleArchive = (_id: string) => {
+    // Archive functionality removed
   };
 
   const handleDelete = (id: string) => {
@@ -191,10 +180,13 @@ function ErrandifyApp() {
   };
 
   const handleResetData = () => {
-    const defaultData = ProductStorage.resetToDefault();
-    setProducts(defaultData);
-    setProductSubView('list');
-    toast.success('Mock data reset to original Errandify sample products.');
+    // Removed - replaced by Add Promotion flow
+  };
+
+  const handleToastFromPanel = (type: 'success' | 'info' | 'error', title: string, message?: string) => {
+    if (type === 'success') toast.success(title, message);
+    else if (type === 'info') toast.info(title, message);
+    else toast.error(title, message);
   };
 
   return (
@@ -233,10 +225,17 @@ function ErrandifyApp() {
               onTogglePublish={handleTogglePublish}
               onBulkUnpublish={handleBulkUnpublish}
               onBulkPublish={handleBulkPublish}
-              onArchiveProduct={handleArchive}
               onDeleteProduct={handleDelete}
               onBulkDelete={handleBulkDelete}
-              onResetData={handleResetData}
+              onOpenPromotions={() => setProductSubView('promotions')}
+            />
+          )}
+
+          {productSubView === 'promotions' && (
+            <PromotionsPanel
+              products={products}
+              onBack={() => setProductSubView('list')}
+              onToast={handleToastFromPanel}
             />
           )}
 
@@ -254,7 +253,6 @@ function ErrandifyApp() {
               onBack={handleBackToList}
               onEdit={() => setProductSubView('edit')}
               onTogglePublish={() => handleTogglePublish(selectedProduct.id)}
-              onArchive={() => setModalArchiveId(selectedProduct.id)}
               onDelete={() => setModalDeleteId(selectedProduct.id)}
             />
           )}
@@ -354,18 +352,7 @@ function ErrandifyApp() {
         />
       )}
 
-      {/* Global Archive Modal for Detail view */}
-      {modalArchiveId && (
-        <ArchiveModal
-          isOpen={!!modalArchiveId}
-          onClose={() => setModalArchiveId(null)}
-          productName={products.find((p) => p.id === modalArchiveId)?.name}
-          onConfirm={() => {
-            handleArchive(modalArchiveId);
-            setModalArchiveId(null);
-          }}
-        />
-      )}
+      {/* Global Archive Modal for Detail view - removed */}
     </DashboardLayout>
   );
 }

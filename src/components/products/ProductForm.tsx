@@ -179,7 +179,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         subcategory: subcategory || undefined,
         productType,
         isPublished,
-        isArchived: initialProduct?.isArchived || false,
       };
 
       if (productType === 'individual') {

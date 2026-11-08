@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AvailabilityStatus } from '../../types/product';
 import type { OrderStatus } from '../../types/order';
+import type { PromotionStatus, PromotionType } from '../../types/promotion';
 
 interface BadgeProps {
   children: React.ReactNode;
@@ -18,7 +19,11 @@ interface BadgeProps {
     | 'runner_assigned'
     | 'picked_up'
     | 'delivered'
-    | 'cancelled';
+    | 'cancelled'
+    | 'active'
+    | 'scheduled'
+    | 'expired'
+    | 'inactive';
   size?: 'sm' | 'md';
   className?: string;
 }
@@ -53,6 +58,12 @@ export const Badge: React.FC<BadgeProps> = ({
     picked_up: 'bg-[#DBEAFE] text-[#2563EB] border border-[#BFDBFE]/60 font-medium',
     delivered: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]',
     cancelled: 'bg-slate-100 text-slate-500 border border-slate-200',
+
+    // Promotion status badges
+    active: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] font-medium',
+    scheduled: 'bg-[#EDE9FE] text-[#6D28D9] border border-[#DDD6FE] font-medium',
+    expired: 'bg-[#FEE2E2] text-[#B91C1C] border border-[#FECACA] font-medium',
+    inactive: 'bg-[#F1F5F9] text-[#64748B] border border-[#E2E8F0] font-medium',
   }[variant];
 
   return (
@@ -108,5 +119,44 @@ export const OrderStatusBadge: React.FC<{ status: OrderStatus; label?: string; c
     <Badge variant={status} className={className}>
       {displayLabel}
     </Badge>
+  );
+};
+
+export const PromotionStatusBadge: React.FC<{ status: PromotionStatus; className?: string }> = ({
+  status,
+  className = '',
+}) => {
+  const labels: Record<PromotionStatus, string> = {
+    active: 'Active',
+    scheduled: 'Scheduled',
+    expired: 'Expired',
+    inactive: 'Inactive',
+  };
+
+  return (
+    <Badge variant={status} className={className}>
+      {labels[status]}
+    </Badge>
+  );
+};
+
+export const PromotionTypeBadge: React.FC<{ type: PromotionType; className?: string }> = ({
+  type,
+  className = '',
+}) => {
+  const labels: Record<PromotionType, string> = {
+    percentage_discount: 'Percentage Discount',
+    fixed_discount: 'Fixed Discount',
+    minimum_purchase: 'Min Purchase Discount',
+    free_delivery: 'Free Delivery',
+    custom: 'Custom Promotion',
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-[#F5F2FE] text-[#5E17EB] border border-[#DDD0FA] ${className}`}
+    >
+      {labels[type]}
+    </span>
   );
 };

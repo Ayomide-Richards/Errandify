@@ -130,3 +130,4 @@ export const SalesTrendChart: React.FC<SalesTrendChartProps> = ({ onPeriodChange
     </div>
   );
 };
+

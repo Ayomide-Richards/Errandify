@@ -27,46 +27,94 @@ export function getProductAvailability(product: Product): AvailabilityStatus {
   return 'in_stock';
 }
 
-export function getProductPriceDisplay(product: Product): { display: string; min: number; max: number } {
+export interface ProductPriceInfo {
+  display: string;
+  min: number;
+  max: number;
+  hasDiscount: boolean;
+  effectivePrice?: number;
+  originalPrice?: number;
+  originalDisplay?: string;
+  discountPercentage?: number;
+}
+
+export function getProductPriceDisplay(product: Product): ProductPriceInfo {
+  // Products with options
   if (product.productType === 'with_options' && product.combinations && product.combinations.length > 0) {
-    const validPrices = product.combinations
-      .filter((c) => c.isAvailable && c.price > 0)
-      .map((c) => c.price);
+    const activeCombs = product.combinations.filter((c) => c.isAvailable && c.price > 0);
+    const targetCombs = activeCombs.length > 0 ? activeCombs : product.combinations;
 
-    if (validPrices.length === 0) {
-      const allPrices = product.combinations.map((c) => c.price);
-      const min = Math.min(...allPrices);
-      const max = Math.max(...allPrices);
-      return {
-        display: min === max ? formatNaira(min) : `${formatNaira(min)} - ${formatNaira(max)}`,
-        min,
-        max,
-      };
-    }
+    const effectivePrices = targetCombs.map((c) =>
+      c.discountPrice && c.discountPrice > 0 && c.discountPrice < c.price
+        ? c.discountPrice
+        : c.price
+    );
+    const originalPrices = targetCombs.map((c) => c.price);
 
-    const min = Math.min(...validPrices);
-    const max = Math.max(...validPrices);
+    const minEffective = Math.min(...effectivePrices);
+    const maxEffective = Math.max(...effectivePrices);
+    const minOriginal = Math.min(...originalPrices);
+    const maxOriginal = Math.max(...originalPrices);
+
+    const hasDiscount = targetCombs.some(
+      (c) => c.discountPrice && c.discountPrice > 0 && c.discountPrice < c.price
+    );
+
+    const display =
+      minEffective === maxEffective
+        ? formatNaira(minEffective)
+        : `${formatNaira(minEffective)} - ${formatNaira(maxEffective)}`;
+
+    const originalDisplay =
+      minOriginal === maxOriginal
+        ? formatNaira(minOriginal)
+        : `${formatNaira(minOriginal)} - ${formatNaira(maxOriginal)}`;
+
     return {
-      display: min === max ? formatNaira(min) : `${formatNaira(min)} - ${formatNaira(max)}`,
-      min,
-      max,
+      display,
+      min: minEffective,
+      max: maxEffective,
+      hasDiscount,
+      originalDisplay: hasDiscount ? originalDisplay : undefined,
     };
   }
 
-  const p = product.price || 0;
+  // Individual product
+  const original = product.price || 0;
+  const discount = product.discountPrice;
+  const hasDiscount = Boolean(discount && discount > 0 && discount < original);
+
+  if (hasDiscount && discount) {
+    const savings = original - discount;
+    const discountPercentage = Math.round((savings / original) * 100);
+
+    return {
+      display: formatNaira(discount),
+      min: discount,
+      max: discount,
+      hasDiscount: true,
+      effectivePrice: discount,
+      originalPrice: original,
+      originalDisplay: formatNaira(original),
+      discountPercentage,
+    };
+  }
+
   return {
-    display: formatNaira(p),
-    min: p,
-    max: p,
+    display: formatNaira(original),
+    min: original,
+    max: original,
+    hasDiscount: false,
+    effectivePrice: original,
+    originalPrice: original,
   };
 }
 
 export function calculateSummaryMetrics(products: Product[]): SummaryMetrics {
-  const activeProducts = products.filter((p) => !p.isArchived);
-  const total = activeProducts.length;
-  const published = activeProducts.filter((p) => p.isPublished).length;
-  const unpublished = activeProducts.filter((p) => !p.isPublished).length;
-  const outOfStock = activeProducts.filter((p) => getProductAvailability(p) === 'out_of_stock').length;
+  const total = products.length;
+  const published = products.filter((p) => p.isPublished).length;
+  const unpublished = products.filter((p) => !p.isPublished).length;
+  const outOfStock = products.filter((p) => getProductAvailability(p) === 'out_of_stock').length;
 
   return {
     totalProducts: total,
@@ -167,10 +215,6 @@ export const ProductStorage = {
       return p;
     });
     this.saveProducts(updated);
-  },
-
-  archiveProduct(id: string): Product {
-    return this.updateProduct(id, { isArchived: true });
   },
 
   deleteProduct(id: string): void {

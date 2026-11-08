@@ -48,3 +48,4 @@ export interface SalesPeriodData {
   totalRevenue: number;
   dataPoints: ChartDataPoint[];
 }
+

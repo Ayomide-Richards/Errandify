@@ -19,6 +19,7 @@ export interface ProductCombination {
   selectedOptions: Record<string, string>; // e.g. { "Colour": "Black", "Size": "40" }
   title: string; // e.g. "Black / 40"
   price: number;
+  discountPrice?: number; // Optional reduced price
   stockQuantity: number;
   isAvailable: boolean;
   sku?: string;
@@ -44,16 +45,16 @@ export interface Product {
   
   // Individual Product Fields
   unitOfSale?: string; // e.g. "Kilogram (kg)", "Bag"
-  price?: number; // Price in Nigerian Naira (₦)
+  price?: number; // Original Price in Nigerian Naira (₦)
+  discountPrice?: number; // Optional Discount Price in Nigerian Naira (₦)
   stockQuantity?: number;
   
   // Product with Options Fields
   options?: ProductOption[];
   combinations?: ProductCombination[];
   
-  // Common Fields
+  // Visibility & Timestamps (Publish, Unpublish, Delete)
   isPublished: boolean;
-  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,4 +73,3 @@ export interface SummaryMetrics {
   unpublishedProducts: number;
   outOfStockProducts: number;
 }
-
