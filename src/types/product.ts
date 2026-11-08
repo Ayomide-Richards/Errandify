@@ -21,6 +21,8 @@ export interface ProductCombination {
   price: number;
   discountPrice?: number; // Optional reduced price
   stockQuantity: number;
+  lowStockThreshold?: number; // Optional per-combination low-stock threshold
+  lastStockUpdate?: string; // Optional timestamp of last stock adjustment
   isAvailable: boolean;
   sku?: string;
   imageIndex?: number; // Optional index of associated product image
@@ -48,6 +50,9 @@ export interface Product {
   price?: number; // Original Price in Nigerian Naira (₦)
   discountPrice?: number; // Optional Discount Price in Nigerian Naira (₦)
   stockQuantity?: number;
+  lowStockThreshold?: number; // Configurable low-stock alert threshold (default: 10)
+  lastStockUpdate?: string; // ISO timestamp of most recent stock change
+  sku?: string; // Optional SKU identifier
   
   // Product with Options Fields
   options?: ProductOption[];

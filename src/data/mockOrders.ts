@@ -16,6 +16,7 @@ export const MOCK_ORDERS: Order[] = [
     items: [
       {
         id: 'item-1',
+        productId: 'prod-001',
         name: 'Ofada rice (50kg)',
         unit: 'Bag',
         price: 45000,
@@ -23,6 +24,7 @@ export const MOCK_ORDERS: Order[] = [
       },
     ],
     notes: 'Please ensure bag is securely tied and dry.',
+    stockDeducted: false,
   },
   {
     id: 'ord-1022',
@@ -36,9 +38,11 @@ export const MOCK_ORDERS: Order[] = [
     statusLabel: 'Preparing',
     totalAmount: 45000,
     paymentMethod: 'Debit Card (Paystack)',
+    stockDeducted: true,
     items: [
       {
         id: 'item-2',
+        productId: 'prod-002',
         name: 'Gino tomato paste',
         unit: 'Carton',
         price: 45000,
@@ -58,9 +62,11 @@ export const MOCK_ORDERS: Order[] = [
     statusLabel: 'Ready for pickup',
     totalAmount: 45000,
     paymentMethod: 'Bank Transfer',
+    stockDeducted: true,
     items: [
       {
         id: 'item-3',
+        productId: 'prod-003',
         name: 'Palm oil (5kg)',
         unit: 'Kilogram (kg)',
         price: 45000,

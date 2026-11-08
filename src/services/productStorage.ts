@@ -1,7 +1,9 @@
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
-import type { AvailabilityStatus, Product, SummaryMetrics } from '../types/product';
+import type { AvailabilityStatus, Product, ProductCombination, SummaryMetrics } from '../types/product';
 
 const STORAGE_KEY = 'errandify_merchant_products_v1';
+export const DEFAULT_LOW_STOCK_THRESHOLD = 10;
+export const DEFAULT_COMBINATION_LOW_STOCK_THRESHOLD = 5;
 
 export function formatNaira(amount: number): string {
   return new Intl.NumberFormat('en-NG', {
@@ -20,10 +22,44 @@ export function getProductStock(product: Product): number {
   return product.stockQuantity || 0;
 }
 
+export function getProductLowStockThreshold(product: Product): number {
+  return product.lowStockThreshold !== undefined && product.lowStockThreshold >= 0
+    ? product.lowStockThreshold
+    : DEFAULT_LOW_STOCK_THRESHOLD;
+}
+
+export function getCombinationLowStockThreshold(
+  comb: ProductCombination,
+  productThreshold?: number
+): number {
+  if (comb.lowStockThreshold !== undefined && comb.lowStockThreshold >= 0) {
+    return comb.lowStockThreshold;
+  }
+  if (productThreshold !== undefined && productThreshold >= 0) {
+    return productThreshold;
+  }
+  return DEFAULT_COMBINATION_LOW_STOCK_THRESHOLD;
+}
+
+export function getCombinationAvailability(
+  comb: ProductCombination,
+  productThreshold?: number
+): AvailabilityStatus {
+  if (!comb.isAvailable || (comb.stockQuantity || 0) <= 0) {
+    return 'out_of_stock';
+  }
+  const threshold = getCombinationLowStockThreshold(comb, productThreshold);
+  if (comb.stockQuantity <= threshold) {
+    return 'low_stock';
+  }
+  return 'in_stock';
+}
+
 export function getProductAvailability(product: Product): AvailabilityStatus {
   const stock = getProductStock(product);
+  const threshold = getProductLowStockThreshold(product);
   if (stock <= 0) return 'out_of_stock';
-  if (stock <= 10) return 'low_stock';
+  if (stock <= threshold) return 'low_stock';
   return 'in_stock';
 }
 

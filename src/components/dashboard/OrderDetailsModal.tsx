@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Order } from '../../types/order';
 import { Modal } from '../common/Modal';
 import { OrderStatusBadge } from '../common/Badge';
 import { Button } from '../common/Button';
-import { formatNaira } from '../../services/productStorage';
+import { ProductStorage, formatNaira } from '../../services/productStorage';
+import { InventoryStorage } from '../../services/inventoryStorage';
 import {
   Package,
   User,
@@ -13,6 +14,7 @@ import {
   CreditCard,
   Bike,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface OrderDetailsModalProps {
@@ -20,6 +22,7 @@ interface OrderDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdateStatus?: (orderId: string, nextStatus: Order['status'], nextLabel: string) => void;
+  onStockUpdated?: () => void;
 }
 
 export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
@@ -27,8 +30,60 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
   isOpen,
   onClose,
   onUpdateStatus,
+  onStockUpdated,
 }) => {
+  const [stockErrors, setStockErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    setStockErrors([]);
+  }, [order, isOpen]);
+
   if (!order) return null;
+
+  const handleAcceptOrder = () => {
+    if (!onUpdateStatus) return;
+
+    // Resolve items to productIds and validate stock if not yet deducted
+    if (!order.stockDeducted) {
+      const allProducts = ProductStorage.getProducts();
+      const checkItems = order.items
+        .map((item) => {
+          if (item.productId) {
+            return {
+              productId: item.productId,
+              combinationId: item.combinationId,
+              quantity: item.quantity,
+            };
+          }
+          const matchedProduct = allProducts.find(
+            (p) => p.name.toLowerCase() === item.name.toLowerCase()
+          );
+          if (matchedProduct) {
+            return {
+              productId: matchedProduct.id,
+              quantity: item.quantity,
+            };
+          }
+          return null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      if (checkItems.length > 0) {
+        const result = InventoryStorage.deductStockForOrder({
+          orderNumber: order.orderNumber,
+          items: checkItems,
+        });
+        if (!result.success) {
+          setStockErrors(result.validation.issues.map((i) => i.message));
+          return;
+        }
+        onStockUpdated?.();
+      }
+    }
+
+    setStockErrors([]);
+    onUpdateStatus(order.id, 'preparing', 'Preparing');
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} maxWidth="lg" showCloseButton>
@@ -148,6 +203,21 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
           </div>
         </div>
 
+        {/* Stock Validation Error Banner */}
+        {stockErrors.length > 0 && (
+          <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl space-y-1.5 text-xs text-red-800">
+            <div className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>Cannot Accept Order — Insufficient Stock</span>
+            </div>
+            <ul className="list-disc list-inside space-y-0.5 text-red-700">
+              {stockErrors.map((msg, idx) => (
+                <li key={idx}>{msg}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Modal Action Footer */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-100">
           <Button variant="outline" size="sm" onClick={onClose}>
@@ -159,7 +229,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
               variant="primary"
               size="sm"
               leftIcon={<CheckCircle2 className="w-4 h-4" />}
-              onClick={() => onUpdateStatus(order.id, 'preparing', 'Preparing')}
+              onClick={handleAcceptOrder}
             >
               Accept & Start Preparing
             </Button>

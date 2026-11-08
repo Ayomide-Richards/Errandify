@@ -9,6 +9,8 @@ export type OrderStatus =
 
 export interface OrderItem {
   id: string;
+  productId?: string;
+  combinationId?: string;
   name: string;
   unit?: string;
   price: number;
@@ -32,6 +34,7 @@ export interface Order {
   runnerName?: string;
   runnerPhone?: string;
   notes?: string;
+  stockDeducted?: boolean; // Prevents duplicate stock deduction for the same order
 }
 
 export interface ChartDataPoint {

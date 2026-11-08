@@ -6,7 +6,11 @@ import { OrderDetailsModal } from '../dashboard/OrderDetailsModal';
 import { formatNaira } from '../../services/productStorage';
 import { Search, X, ShoppingCart, Filter } from 'lucide-react';
 
-export const OrdersView: React.FC = () => {
+interface OrdersViewProps {
+  onStockUpdated?: () => void;
+}
+
+export const OrdersView: React.FC<OrdersViewProps> = ({ onStockUpdated }) => {
   const [orders, setOrders] = useState<Order[]>(MOCK_ORDERS);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,12 +39,16 @@ export const OrdersView: React.FC = () => {
   ) => {
     setOrders((prev) =>
       prev.map((o) =>
-        o.id === orderId ? { ...o, status: nextStatus, statusLabel: nextLabel } : o
+        o.id === orderId
+          ? { ...o, status: nextStatus, statusLabel: nextLabel, stockDeducted: true }
+          : o
       )
     );
     if (selectedOrder && selectedOrder.id === orderId) {
       setSelectedOrder((prev) =>
-        prev ? { ...prev, status: nextStatus, statusLabel: nextLabel } : null
+        prev
+          ? { ...prev, status: nextStatus, statusLabel: nextLabel, stockDeducted: true }
+          : null
       );
     }
   };
@@ -162,6 +170,7 @@ export const OrdersView: React.FC = () => {
         isOpen={!!selectedOrder}
         onClose={() => setSelectedOrder(null)}
         onUpdateStatus={handleUpdateStatus}
+        onStockUpdated={onStockUpdated}
       />
     </div>
   );

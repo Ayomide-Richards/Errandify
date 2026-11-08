@@ -8,9 +8,10 @@ import { ProductForm } from './components/products/ProductForm';
 import { ProductDetails } from './components/products/ProductDetails';
 import { OverviewView } from './components/dashboard/OverviewView';
 import { OrdersView } from './components/orders/OrdersView';
+import { InventoryView } from './components/inventory/InventoryView';
 import { DeleteModal } from './components/products/modals/DeleteModal';
 import { PromotionsPanel } from './components/promotions/PromotionsPanel';
-import { Store, Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
+import { Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
 
 type ProductSubView = 'list' | 'add' | 'view' | 'edit' | 'promotions';
 
@@ -260,32 +261,20 @@ function ErrandifyApp() {
         </>
       )}
 
-      {/* Tab 3: Inventory Placeholder */}
+      {/* Tab 3: Inventory Management */}
       {currentTab === 'inventory' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-3">
-          <div className="w-14 h-14 rounded-full bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center mx-auto">
-            <Store className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Inventory Management</h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            View stock thresholds, batch stock updates, and reorder alerts. Manage individual product quantities directly in Products.
-          </p>
-          <div className="pt-2">
-            <button
-              onClick={() => {
-                setCurrentTab('products');
-                setProductSubView('list');
-              }}
-              className="text-sm font-semibold text-[#5E17EB] hover:underline"
-            >
-              Go to Products Catalog →
-            </button>
-          </div>
-        </div>
+        <InventoryView
+          products={products}
+          onRefreshProducts={refreshProducts}
+          onNavigateToAddProduct={() => {
+            setCurrentTab('products');
+            handleNavigateToAddProduct();
+          }}
+        />
       )}
 
       {/* Tab 4: Orders */}
-      {currentTab === 'orders' && <OrdersView />}
+      {currentTab === 'orders' && <OrdersView onStockUpdated={refreshProducts} />}
 
       {/* Tab 5: Sales Placeholder */}
       {currentTab === 'sales' && (
