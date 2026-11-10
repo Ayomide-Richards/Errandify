@@ -41,10 +41,7 @@ export interface Order {
   productDiscountTotal: number;
   promotionDiscountAmount: number;
   promotionName?: string;
-  deliveryFee: number;
-  otherCharges: number;
-  otherChargesLabel?: string;
-  totalAmount: number;
+  totalAmount: number; // Merchant Order Value = Product Subtotal - Applicable Product Discounts
   notes?: string; // Customer instructions or notes attached to the order
   runnerName?: string;
   runnerVehicle?: string;

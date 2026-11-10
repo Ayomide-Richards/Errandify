@@ -10,7 +10,7 @@ import { ProductStorage } from './productStorage';
 import { InventoryStorage } from './inventoryStorage';
 import { PromotionStorage, getPromotionStatus } from './promotionStorage';
 
-const ORDERS_STORAGE_KEY = 'errandify_merchant_orders_v3';
+const ORDERS_STORAGE_KEY = 'errandify_merchant_orders_v4';
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   new_order: 'New Order',
@@ -87,10 +87,40 @@ export function canTransitionOrderStatus(
 function normalizeOrderRecord(order: Order): Order {
   const validStatus: OrderStatus =
     order.status in STATUS_LABELS ? order.status : 'new_order';
+
+  const calculatedSubtotal =
+    order.items && order.items.length > 0
+      ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      : order.subtotal || 0;
+
+  const calculatedProductDiscount =
+    order.items && order.items.length > 0
+      ? order.items.reduce((sum, item) => {
+          if (
+            typeof item.discountPrice === 'number' &&
+            item.discountPrice > 0 &&
+            item.discountPrice < item.price
+          ) {
+            return sum + (item.price - item.discountPrice) * item.quantity;
+          }
+          return sum;
+        }, 0)
+      : order.productDiscountTotal || 0;
+
+  const promotionDiscount = order.promotionDiscountAmount || 0;
+  const orderValue = Math.max(
+    0,
+    calculatedSubtotal - calculatedProductDiscount - promotionDiscount
+  );
+
   return {
     ...order,
     status: validStatus,
     statusLabel: STATUS_LABELS[validStatus],
+    subtotal: calculatedSubtotal,
+    productDiscountTotal: calculatedProductDiscount,
+    promotionDiscountAmount: promotionDiscount,
+    totalAmount: orderValue,
   };
 }
 
@@ -269,8 +299,6 @@ export const OrderStorage = {
     customerName: string;
     paymentConfirmed: boolean;
     notes?: string;
-    deliveryFee?: number;
-    otherCharges?: number;
     items: Array<{
       productId: string;
       combinationId?: string;
@@ -412,11 +440,10 @@ export const OrderStorage = {
       }
     }
 
-    const deliveryFee = payload.deliveryFee ?? 1800;
-    const otherCharges = payload.otherCharges ?? 500;
+    // Order Value = Product Subtotal − Applicable Product Discounts
     const totalAmount = Math.max(
       0,
-      subtotal - productDiscountTotal - promotionDiscountAmount + deliveryFee + otherCharges
+      subtotal - productDiscountTotal - promotionDiscountAmount
     );
 
     const nowIso = new Date().toISOString();
@@ -449,9 +476,6 @@ export const OrderStorage = {
       productDiscountTotal,
       promotionDiscountAmount,
       promotionName,
-      deliveryFee,
-      otherCharges,
-      otherChargesLabel: 'Packaging & Service Charge',
       totalAmount,
       notes: payload.notes?.trim() || undefined,
       paymentConfirmed: true,

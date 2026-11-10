@@ -65,6 +65,35 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
     (s) => s.status === order.status
   );
 
+  const productSubtotal =
+    typeof order.subtotal === 'number' && order.subtotal > 0
+      ? order.subtotal
+      : order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  const productDiscountTotal =
+    typeof order.productDiscountTotal === 'number'
+      ? order.productDiscountTotal
+      : order.items.reduce((sum, item) => {
+          if (
+            typeof item.discountPrice === 'number' &&
+            item.discountPrice > 0 &&
+            item.discountPrice < item.price
+          ) {
+            return sum + (item.price - item.discountPrice) * item.quantity;
+          }
+          return sum;
+        }, 0);
+
+  const promotionDiscountAmount =
+    typeof order.promotionDiscountAmount === 'number'
+      ? order.promotionDiscountAmount
+      : 0;
+
+  const orderValue = Math.max(
+    0,
+    productSubtotal - productDiscountTotal - promotionDiscountAmount
+  );
+
   const handleStatusTransition = (
     nextStatus: OrderStatus,
     options?: { handoverNotes?: string }
@@ -113,9 +142,9 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
           </div>
 
           <div className="sm:text-right bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-slate-100 sm:border-0">
-            <span className="text-xs text-slate-400 block">Total Amount</span>
+            <span className="text-xs text-slate-400 block">Order Value</span>
             <span className="text-xl font-extrabold text-slate-900 tabular-nums">
-              {formatNaira(order.totalAmount)}
+              {formatNaira(orderValue)}
             </span>
           </div>
         </div>
@@ -354,68 +383,42 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
         {/* Financial Breakdown */}
         <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 space-y-2 text-xs">
           <div className="flex items-center justify-between text-slate-600">
-            <span>Subtotal (Before Discounts)</span>
+            <span>Product Subtotal</span>
             <span className="tabular-nums font-medium text-slate-800">
-              {formatNaira(order.subtotal)}
+              {formatNaira(productSubtotal)}
             </span>
           </div>
 
-          <div className="flex items-center justify-between text-slate-600">
-            <span>Product Discounts</span>
-            <span
-              className={`tabular-nums font-medium ${
-                order.productDiscountTotal > 0
-                  ? 'text-emerald-700'
-                  : 'text-slate-500'
-              }`}
-            >
-              {order.productDiscountTotal > 0
-                ? `-${formatNaira(order.productDiscountTotal)}`
-                : formatNaira(0)}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-slate-600 gap-2">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span>Promotion Discounts</span>
-              {order.promotionName && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#F3EFFE] text-[#5E17EB] border border-[#DDD0FA]">
-                  <Tag className="w-2.5 h-2.5" />
-                  {order.promotionName}
-                </span>
-              )}
+          {productDiscountTotal > 0 && (
+            <div className="flex items-center justify-between text-slate-600">
+              <span>Product Discounts</span>
+              <span className="tabular-nums font-medium text-emerald-700">
+                -{formatNaira(productDiscountTotal)}
+              </span>
             </div>
-            <span
-              className={`tabular-nums font-medium shrink-0 ${
-                order.promotionDiscountAmount > 0
-                  ? 'text-emerald-700'
-                  : 'text-slate-500'
-              }`}
-            >
-              {order.promotionDiscountAmount > 0
-                ? `-${formatNaira(order.promotionDiscountAmount)}`
-                : formatNaira(0)}
-            </span>
-          </div>
+          )}
 
-          <div className="flex items-center justify-between text-slate-600">
-            <span>Delivery Fee</span>
-            <span className="tabular-nums font-medium text-slate-800">
-              {formatNaira(order.deliveryFee)}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-slate-600">
-            <span>{order.otherChargesLabel || 'Other Applicable Charges'}</span>
-            <span className="tabular-nums font-medium text-slate-800">
-              {formatNaira(order.otherCharges)}
-            </span>
-          </div>
+          {promotionDiscountAmount > 0 && (
+            <div className="flex items-center justify-between text-slate-600 gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span>Applicable Product Promotion Discounts</span>
+                {order.promotionName && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#F3EFFE] text-[#5E17EB] border border-[#DDD0FA]">
+                    <Tag className="w-2.5 h-2.5" />
+                    {order.promotionName}
+                  </span>
+                )}
+              </div>
+              <span className="tabular-nums font-medium shrink-0 text-emerald-700">
+                -{formatNaira(promotionDiscountAmount)}
+              </span>
+            </div>
+          )}
 
           <div className="pt-2.5 border-t border-slate-200 flex items-center justify-between text-sm font-extrabold text-slate-900">
-            <span>Total Amount</span>
+            <span>Order Value</span>
             <span className="tabular-nums text-base text-[#5E17EB]">
-              {formatNaira(order.totalAmount)}
+              {formatNaira(orderValue)}
             </span>
           </div>
         </div>
