@@ -16,6 +16,8 @@ interface BadgeProps {
     | 'new_order'
     | 'preparing'
     | 'ready_for_pickup'
+    | 'handed_over'
+    | 'completed'
     | 'runner_assigned'
     | 'picked_up'
     | 'delivered'
@@ -50,14 +52,16 @@ export const Badge: React.FC<BadgeProps> = ({
     purple: 'bg-[#F3EFFE] text-[#5E17EB] border border-[#DDD0FA] font-medium',
     neutral: 'bg-slate-100 text-slate-700 border border-slate-200',
 
-    // Order status badges (Exact match from Merchant Dashboard Active.png)
+    // Order status badges
     new_order: 'bg-[#FFEDD5] text-[#C2410C] border border-[#FED7AA]/60 font-medium',
     preparing: 'bg-[#E0F2FE] text-[#0284C7] border border-[#BAE6FD]/60 font-medium',
     ready_for_pickup: 'bg-[#EDE9FE] text-[#6D28D9] border border-[#DDD6FE]/60 font-medium',
+    handed_over: 'bg-[#DBEAFE] text-[#2563EB] border border-[#BFDBFE]/60 font-medium',
+    completed: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] font-medium',
     runner_assigned: 'bg-[#FFE4E6] text-[#E11D48] border border-[#FECDD3]/60 font-medium',
     picked_up: 'bg-[#DBEAFE] text-[#2563EB] border border-[#BFDBFE]/60 font-medium',
     delivered: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]',
-    cancelled: 'bg-slate-100 text-slate-500 border border-slate-200',
+    cancelled: 'bg-[#FEE2E2] text-[#B91C1C] border border-[#FECACA] font-medium',
 
     // Promotion status badges
     active: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] font-medium',
@@ -105,15 +109,15 @@ export const OrderStatusBadge: React.FC<{ status: OrderStatus; label?: string; c
   label,
   className = '',
 }) => {
-  const displayLabel = label || {
-    new_order: 'New order',
+  const canonicalLabels: Record<OrderStatus, string> = {
+    new_order: 'New Order',
     preparing: 'Preparing',
-    ready_for_pickup: 'Ready for pickup',
-    runner_assigned: 'Runner assigned',
-    picked_up: 'Picked up',
-    delivered: 'Delivered',
-    cancelled: 'Cancelled',
-  }[status];
+    ready_for_pickup: 'Ready for Pickup',
+    runner_assigned: 'Runner Assigned',
+    picked_up: 'Picked Up',
+  };
+
+  const displayLabel = label || canonicalLabels[status];
 
   return (
     <Badge variant={status} className={className}>

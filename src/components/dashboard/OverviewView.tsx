@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Product } from '../../types/product';
-import type { Order } from '../../types/order';
-import { MOCK_ORDERS } from '../../data/mockOrders';
+import type { Order, OrderStatus } from '../../types/order';
+import { OrderStorage, STATUS_LABELS } from '../../services/orderStorage';
 import { OrderStatusBadge } from '../common/Badge';
+import { useToast } from '../common/Toast';
 import { SalesTrendChart } from './SalesTrendChart';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { ArrowRight } from 'lucide-react';
@@ -17,27 +18,42 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onNavigateToProducts,
   onNavigateToOrders,
 }) => {
-  const [orders, setOrders] = useState<Order[]>(MOCK_ORDERS);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const toast = useToast();
+  const [orders, setOrders] = useState<Order[]>(() => OrderStorage.getOrders());
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncOrders = () => {
+      setOrders(OrderStorage.getOrders());
+    };
+    window.addEventListener('errandify:orders-updated', syncOrders);
+    window.addEventListener('storage', syncOrders);
+    return () => {
+      window.removeEventListener('errandify:orders-updated', syncOrders);
+      window.removeEventListener('storage', syncOrders);
+    };
+  }, []);
+
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
 
   // Take the top 5 recent orders shown in the reference design
   const recentOrders = orders.slice(0, 5);
 
   const handleUpdateOrderStatus = (
     orderId: string,
-    nextStatus: Order['status'],
-    nextLabel: string
+    nextStatus: OrderStatus,
+    options?: { handoverNotes?: string }
   ) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId ? { ...o, status: nextStatus, statusLabel: nextLabel } : o
-      )
+    const { updatedOrder } = OrderStorage.updateOrderStatus({
+      orderId,
+      nextStatus,
+      handoverNotes: options?.handoverNotes,
+    });
+    setOrders(OrderStorage.getOrders());
+    toast.success(
+      `Order status updated to ${STATUS_LABELS[nextStatus]}`,
+      `${updatedOrder.customerName}'s order is now ${STATUS_LABELS[nextStatus]}.`
     );
-    if (selectedOrder && selectedOrder.id === orderId) {
-      setSelectedOrder((prev) =>
-        prev ? { ...prev, status: nextStatus, statusLabel: nextLabel } : null
-      );
-    }
   };
 
   return (
@@ -157,7 +173,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 {recentOrders.map((order) => (
                   <tr
                     key={order.id}
-                    onClick={() => setSelectedOrder(order)}
+                    onClick={() => setSelectedOrderId(order.id)}
                     className="hover:bg-[#F8F9FE] transition-colors cursor-pointer group"
                   >
                     {/* Order No */}
@@ -201,7 +217,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       <OrderDetailsModal
         order={selectedOrder}
         isOpen={!!selectedOrder}
-        onClose={() => setSelectedOrder(null)}
+        onClose={() => setSelectedOrderId(null)}
         onUpdateStatus={handleUpdateOrderStatus}
       />
     </div>

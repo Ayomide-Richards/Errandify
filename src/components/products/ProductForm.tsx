@@ -323,7 +323,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                 <label className="text-xs font-bold text-slate-800">
                   Product Name <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[11px] text-slate-400 font-mono">
+                <span className="text-[11px] text-slate-400 tabular-nums">
                   {name.length}/100
                 </span>
               </div>
@@ -356,7 +356,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                 <label className="text-xs font-bold text-slate-800">
                   Product Description <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[11px] text-slate-400 font-mono">
+                <span className="text-[11px] text-slate-400 tabular-nums">
                   {description.length}/1500
                 </span>
               </div>

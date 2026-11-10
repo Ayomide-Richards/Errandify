@@ -167,7 +167,7 @@ export const StockHistoryModal: React.FC<StockHistoryModalProps> = ({
                     )}
                   </td>
 
-                  <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
+                  <td className="py-3 px-3.5 text-center tabular-nums whitespace-nowrap">
                     <span className="text-slate-500">{rec.previousQuantity}</span>
                     <span className="mx-1 text-slate-400">→</span>
                     <span className="font-bold text-slate-900">

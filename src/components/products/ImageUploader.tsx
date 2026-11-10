@@ -261,7 +261,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                   >
                     <ArrowLeft className="w-3 h-3" />
                   </button>
-                  <span className="text-[10px] text-white bg-black/60 px-1.5 py-0.5 rounded-md font-mono">
+                  <span className="text-[10px] text-white bg-black/60 px-1.5 py-0.5 rounded-md tabular-nums">
                     #{index + 1}
                   </span>
                   <button

@@ -299,7 +299,7 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
 
               <div>
                 <span className="text-slate-500 block mb-0.5">Product ID</span>
-                <div className="flex items-center gap-1.5 font-mono text-slate-700">
+                <div className="flex items-center gap-1.5 text-slate-700">
                   <span className="truncate max-w-[140px]">{product.id}</span>
                   <button
                     onClick={handleCopyId}

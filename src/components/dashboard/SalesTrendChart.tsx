@@ -53,7 +53,7 @@ export const SalesTrendChart: React.FC<SalesTrendChartProps> = ({ onPeriodChange
         {/* Y-Axis Scale Markings (Exact match from reference image: - 50, - 40, - 30, - 25, - 20, - 15, - 10, - 5) */}
         <div className="flex flex-col justify-between shrink-0 text-slate-400 text-xs font-normal pr-1 pb-7">
           {yTicks.map((tick) => (
-            <span key={tick} className="leading-none text-right font-mono">
+            <span key={tick} className="leading-none text-right tabular-nums">
               - {tick}
             </span>
           ))}

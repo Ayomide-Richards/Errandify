@@ -456,7 +456,7 @@ export const InventoryDetailsModal: React.FC<InventoryDetailsModalProps> = ({
                         </td>
                       )}
 
-                      <td className="py-2.5 px-3 font-mono whitespace-nowrap">
+                      <td className="py-2.5 px-3 tabular-nums whitespace-nowrap">
                         <span className="text-slate-500">{rec.previousQuantity}</span>
                         <span className="mx-1 text-slate-400">→</span>
                         <span className="font-bold text-slate-900">
