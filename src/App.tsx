@@ -9,9 +9,10 @@ import { ProductDetails } from './components/products/ProductDetails';
 import { OverviewView } from './components/dashboard/OverviewView';
 import { OrdersView } from './components/orders/OrdersView';
 import { InventoryView } from './components/inventory/InventoryView';
+import { SalesAndEarningsView } from './components/sales/SalesAndEarningsView';
 import { DeleteModal } from './components/products/modals/DeleteModal';
 import { PromotionsPanel } from './components/promotions/PromotionsPanel';
-import { Wallet, Settings as SettingsIcon, Headphones } from 'lucide-react';
+import { Settings as SettingsIcon, Headphones } from 'lucide-react';
 
 type ProductSubView = 'list' | 'add' | 'view' | 'edit' | 'promotions';
 
@@ -276,18 +277,8 @@ function ErrandifyApp() {
       {/* Tab 4: Orders */}
       {currentTab === 'orders' && <OrdersView onStockUpdated={refreshProducts} />}
 
-      {/* Tab 5: Sales Placeholder */}
-      {currentTab === 'sales' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-3">
-          <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-            <Wallet className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Sales & Payouts</h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            View real-time merchant payouts, transaction breakdowns, and bank settlements.
-          </p>
-        </div>
-      )}
+      {/* Tab 5: Sales & Earnings */}
+      {currentTab === 'sales' && <SalesAndEarningsView />}
 
       {/* Tab 6: Settings Placeholder */}
       {currentTab === 'settings' && (
