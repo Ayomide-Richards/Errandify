@@ -35,7 +35,6 @@ import {
   ChevronLeft,
   Edit3,
   Check,
-  Eye,
   PackageOpen,
   Plus,
   RotateCcw,
@@ -779,31 +778,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           className="py-3.5 pl-2 pr-4 text-right align-middle whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              variant="purple-light"
-                              size="sm"
-                              onClick={() =>
-                                setAdjustModalState({
-                                  isOpen: true,
-                                  productId: product.id,
-                                  initialType: 'add',
-                                })
-                              }
-                            >
-                              Adjust Stock
-                            </Button>
-
-                            <button
-                              type="button"
-                              onClick={() => setDetailsProductId(product.id)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#5E17EB] hover:bg-[#F3EFFE] transition-colors shrink-0"
-                              title="View product inventory details & history"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                          </div>
+                          <Button
+                            type="button"
+                            variant="purple-light"
+                            size="sm"
+                            onClick={() =>
+                              setAdjustModalState({
+                                isOpen: true,
+                                productId: product.id,
+                                initialType: 'add',
+                              })
+                            }
+                          >
+                            Adjust Stock
+                          </Button>
                         </td>
                       </tr>
 
