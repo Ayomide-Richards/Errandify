@@ -309,3 +309,4 @@ export const TransactionDetailsModal: React.FC<
     </Modal>
   );
 };
+

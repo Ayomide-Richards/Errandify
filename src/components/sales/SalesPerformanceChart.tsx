@@ -352,3 +352,4 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
     </div>
   );
 };
+

@@ -185,3 +185,4 @@ export interface TransactionFiltersState {
   maxAmount: string;
   sortBy: TransactionSortOption;
 }
+

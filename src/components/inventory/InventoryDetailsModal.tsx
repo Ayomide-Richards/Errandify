@@ -132,7 +132,7 @@ export const InventoryDetailsModal: React.FC<InventoryDetailsModalProps> = ({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-lg font-bold text-slate-900 truncate">
+              <h3 className="text-lg font-bold text-slate-900 leading-snug break-words">
                 {product.name}
               </h3>
               <AvailabilityBadge status={availability} />
@@ -478,7 +478,7 @@ export const InventoryDetailsModal: React.FC<InventoryDetailsModalProps> = ({
                           {rec.reason}
                         </span>
                         {rec.notes && (
-                          <span className="text-[11px] text-slate-400 line-clamp-1">
+                          <span className="text-[11px] text-slate-400 block leading-snug break-words mt-0.5">
                             {rec.notes}
                           </span>
                         )}

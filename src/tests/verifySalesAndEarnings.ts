@@ -287,3 +287,4 @@ assert(
 );
 
 console.log('--- ALL SALES & EARNINGS SCENARIOS VERIFIED SUCCESSFULLY ---');
+

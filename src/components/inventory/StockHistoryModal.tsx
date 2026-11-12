@@ -175,12 +175,12 @@ export const StockHistoryModal: React.FC<StockHistoryModalProps> = ({
                     </span>
                   </td>
 
-                  <td className="py-3 px-3.5 max-w-[200px]">
+                  <td className="py-3 px-3.5">
                     <span className="font-semibold text-slate-800 block">
                       {rec.reason}
                     </span>
                     {rec.notes && (
-                      <span className="text-[11px] text-slate-500 block line-clamp-2 mt-0.5">
+                      <span className="text-[11px] text-slate-500 block leading-snug break-words mt-0.5">
                         {rec.notes}
                       </span>
                     )}

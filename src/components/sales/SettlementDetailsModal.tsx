@@ -235,3 +235,4 @@ export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
     </Modal>
   );
 };
+
