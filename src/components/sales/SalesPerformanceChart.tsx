@@ -15,25 +15,14 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
   hasAnyStoreSales,
 }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [metricMode, setMetricMode] = useState<'netSales' | 'grossSales'>(
-    'netSales'
-  );
 
-  const totalMetricValue = buckets.reduce(
-    (sum, b) => sum + (metricMode === 'netSales' ? b.netSales : b.grossSales),
-    0
-  );
+  const totalSalesValue = buckets.reduce((sum, b) => sum + b.salesAmount, 0);
   const totalOrdersInBuckets = buckets.reduce(
     (sum, b) => sum + b.orderCount,
     0
   );
 
-  const rawMax = Math.max(
-    0,
-    ...buckets.map((b) =>
-      metricMode === 'netSales' ? b.netSales : b.grossSales
-    )
-  );
+  const rawMax = Math.max(0, ...buckets.map((b) => b.salesAmount));
 
   // Compute nice rounded Y-axis ceiling
   const maxVal =
@@ -77,13 +66,15 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
   const usableHeight = svgHeight - padTop - padBottom;
 
   const points = buckets.map((b, idx) => {
-    const val = metricMode === 'netSales' ? b.netSales : b.grossSales;
+    const val = b.salesAmount;
     const x =
       buckets.length <= 1
         ? padX + usableWidth / 2
         : padX + (idx / (buckets.length - 1)) * usableWidth;
     const y =
-      padTop + usableHeight - Math.min(1, Math.max(0, val / maxVal)) * usableHeight;
+      padTop +
+      usableHeight -
+      Math.min(1, Math.max(0, val / maxVal)) * usableHeight;
     return { x, y, val, bucket: b, idx };
   });
 
@@ -108,47 +99,36 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-base sm:text-lg font-bold text-slate-900">
-            Sales Performance
+            Sales Over Time
           </h3>
           <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
             <span>
-              {periodWindow.label}: <strong>{periodWindow.formattedRange}</strong>
+              {periodWindow.label}:{' '}
+              <strong>{periodWindow.formattedRange}</strong>
             </span>
-            <span>·</span>
-            <span>{periodWindow.timezoneLabel}</span>
           </p>
         </div>
 
-        {/* Metric Toggle (Net Sales vs Gross Sales) */}
-        <div className="inline-flex items-center bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setMetricMode('netSales')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              metricMode === 'netSales'
-                ? 'bg-white text-[#5E17EB] shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Net Earnings
-          </button>
-          <button
-            type="button"
-            onClick={() => setMetricMode('grossSales')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              metricMode === 'grossSales'
-                ? 'bg-white text-[#5E17EB] shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Gross Sales
-          </button>
+        <div className="flex items-center gap-3 text-xs bg-slate-50 border border-slate-200/70 px-3.5 py-2 rounded-xl self-start sm:self-auto">
+          <div>
+            <span className="text-slate-500">Period Sales: </span>
+            <strong className="text-[#5E17EB] tabular-nums">
+              {formatNaira(totalSalesValue)}
+            </strong>
+          </div>
+          <span className="text-slate-300">·</span>
+          <div>
+            <span className="text-slate-500">Paid Orders: </span>
+            <strong className="text-slate-900 tabular-nums">
+              {totalOrdersInBuckets}
+            </strong>
+          </div>
         </div>
       </div>
 
       {/* Empty State when no sales exist for the selected period */}
-      {totalOrdersInBuckets === 0 || totalMetricValue === 0 ? (
+      {totalOrdersInBuckets === 0 || totalSalesValue === 0 ? (
         <div className="border border-dashed border-slate-200 rounded-xl py-12 px-4 text-center space-y-2.5 bg-slate-50/50">
           <div className="w-12 h-12 rounded-full bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center mx-auto">
             <BarChart3 className="w-6 h-6 stroke-[1.75]" />
@@ -160,8 +140,8 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
           </h4>
           <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
             {!hasAnyStoreSales
-              ? 'Your sales performance chart will populate automatically as soon as confirmed customer transactions are recorded.'
-              : 'There were no successful sales transactions during this reporting period. Try selecting Last 7 Days, This Month, or a custom date range.'}
+              ? 'Your sales chart will populate automatically as soon as paid customer orders are recorded.'
+              : 'There were no paid product orders during this date range. Try selecting Last 7 Days, Last 30 Days, This Month, or a custom range.'}
           </p>
         </div>
       ) : (
@@ -193,7 +173,11 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
                     y2="1"
                   >
                     <stop offset="0%" stopColor="#5E17EB" stopOpacity="0.22" />
-                    <stop offset="100%" stopColor="#5E17EB" stopOpacity="0.01" />
+                    <stop
+                      offset="100%"
+                      stopColor="#5E17EB"
+                      stopOpacity="0.01"
+                    />
                   </linearGradient>
                 </defs>
 
@@ -209,7 +193,9 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
                       x2={svgWidth - padX}
                       y2={yPos}
                       stroke="#E2E8F0"
-                      strokeDasharray={idx === yTicks.length - 1 ? undefined : '4 4'}
+                      strokeDasharray={
+                        idx === yTicks.length - 1 ? undefined : '4 4'
+                      }
                       strokeWidth="1"
                     />
                   );
@@ -276,7 +262,9 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
                       onMouseEnter={() => setHoveredIndex(pt.idx)}
                       onMouseLeave={() => setHoveredIndex(null)}
                       onClick={() =>
-                        setHoveredIndex(hoveredIndex === pt.idx ? null : pt.idx)
+                        setHoveredIndex(
+                          hoveredIndex === pt.idx ? null : pt.idx
+                        )
                       }
                     >
                       {isHovered && (
@@ -300,27 +288,13 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
                             {pt.bucket.fullLabel}
                           </p>
                           <div className="flex items-center justify-between gap-4">
-                            <span className="text-slate-300">Gross Sales:</span>
-                            <span className="font-semibold tabular-nums">
-                              {formatNaira(pt.bucket.grossSales)}
-                            </span>
-                          </div>
-                          {pt.bucket.discounts > 0 && (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className="text-slate-300">Discounts:</span>
-                              <span className="font-semibold text-emerald-400 tabular-nums">
-                                -{formatNaira(pt.bucket.discounts)}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between gap-4">
-                            <span className="text-slate-300">Net Earnings:</span>
+                            <span className="text-slate-300">Total Sales:</span>
                             <span className="font-bold text-[#C4B5FD] tabular-nums">
-                              {formatNaira(pt.bucket.netSales)}
+                              {formatNaira(pt.bucket.salesAmount)}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-4 pt-0.5 text-[10px] text-slate-400">
-                            <span>Qualifying Orders:</span>
+                            <span>Paid Orders:</span>
                             <span className="font-semibold text-white">
                               {pt.bucket.orderCount}{' '}
                               {pt.bucket.orderCount === 1 ? 'order' : 'orders'}
@@ -352,4 +326,3 @@ export const SalesPerformanceChart: React.FC<SalesPerformanceChartProps> = ({
     </div>
   );
 };
-

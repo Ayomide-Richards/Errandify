@@ -1,48 +1,50 @@
 import { OrderStorage } from './orderStorage';
-import { formatNaira } from './productStorage';
 import type { Order } from '../types/order';
 import type {
   DateRangeWindow,
-  FinancialOverviewMetrics,
-  MerchantFeeConfig,
-  MerchantSettlementSchedule,
-  PeriodComparisonInsight,
+  FundsStatus,
+  OverviewSummaryMetrics,
+  PaymentStatus,
   ProductSalesPerformanceItem,
   ReportingPeriodPreset,
   SalesChartBucket,
   SalesTransaction,
+  SettlementIncludedOrder,
   SettlementRecord,
   SettlementStatus,
-  TransactionStatus,
+  SettlementSummaryMetrics,
 } from '../types/sales';
 
 export const MERCHANT_TIMEZONE = 'Africa/Lagos';
 export const MERCHANT_TIMEZONE_LABEL = 'WAT (UTC+01:00)';
 
-const FEE_CONFIG_STORAGE_KEY = 'errandify_merchant_fee_config_v1';
-const SETTLEMENT_SCHEDULE_STORAGE_KEY = 'errandify_merchant_settlement_schedule_v1';
-const SETTLEMENTS_STORAGE_KEY = 'errandify_merchant_settlements_v1';
-const TX_META_STORAGE_KEY = 'errandify_merchant_tx_meta_v1';
+const SETTLEMENTS_STORAGE_KEY = 'errandify_merchant_settlements_v2';
+const TX_META_STORAGE_KEY = 'errandify_merchant_tx_meta_v2';
 
 export interface TransactionMetadataOverride {
-  status?: TransactionStatus;
+  paymentStatus?: PaymentStatus;
   refundedAmount?: number;
-  merchantFeeAmount?: number;
-  merchantFeeLabel?: string;
+  deliveryConfirmed?: boolean;
+  deliveryConfirmedAt?: string;
   settlementId?: string;
-  settlementStatus?: SettlementStatus | 'unsettled';
+  settlementStatus?: SettlementStatus;
 }
 
-export const TRANSACTION_STATUS_LABELS: Record<TransactionStatus, string> = {
-  successful: 'Successful',
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  confirmed: 'Confirmed',
   pending: 'Pending',
   failed: 'Failed',
   refunded: 'Refunded',
-  partially_refunded: 'Partially Refunded',
+};
+
+export const FUNDS_STATUS_LABELS: Record<FundsStatus, string> = {
+  in_escrow: 'In Escrow',
+  awaiting_settlement: 'Awaiting Settlement',
+  settled: 'Settled',
+  refunded: 'Refunded',
 };
 
 export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
-  pending: 'Pending',
   processing: 'Processing',
   paid: 'Paid',
   failed: 'Failed',
@@ -50,36 +52,263 @@ export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
 
 export const REPORTING_PERIOD_LABELS: Record<ReportingPeriodPreset, string> = {
   today: 'Today',
-  yesterday: 'Yesterday',
   last_7_days: 'Last 7 Days',
   last_30_days: 'Last 30 Days',
   this_month: 'This Month',
   last_month: 'Last Month',
-  this_year: 'This Year',
-  custom: 'Custom Date Range',
+  custom: 'Custom Range',
 };
 
 /**
- * Default merchant commission/fee config.
- * Because the project does not define a universal commission percentage or fee rule,
- * `isConfigured` defaults to `false` so no fabricated deductions are shown.
+ * Merchant bank account details collected during merchant onboarding.
  */
-const DEFAULT_FEE_CONFIG: MerchantFeeConfig = {
-  isConfigured: false,
-  commissionPercentage: null,
-  fixedFeePerTransaction: null,
-  feeCapAmount: null,
-  description:
-    'No merchant commission or platform deduction rule is currently configured for this store.',
+export const MERCHANT_ONBOARDED_BANK = {
+  bankName: 'Guaranty Trust Bank (GTBank)',
+  maskedAccountNumber: '****4821',
+  accountName: 'XYZ Limited',
 };
 
 /**
- * Default merchant settlement schedule.
- * No payout schedule is fabricated when none is configured on the backend.
+ * Supplemental completed order records demonstrating the full payment, escrow,
+ * runner delivery confirmation (customer code verification), refund, and combined-settlement lifecycle
+ * without altering the active Orders management queue.
  */
-const DEFAULT_SETTLEMENT_SCHEDULE: MerchantSettlementSchedule = {
-  isConfigured: false,
+const HISTORICAL_DELIVERED_ORDERS: Order[] = [
+  {
+    id: 'ord-1004',
+    orderNumber: '#ER-1004',
+    itemSummary: 'Ofada rice (50kg), Mama Gold Pure Vegetable Oil (5L)',
+    customerName: 'Ngozi Eze',
+    dateTime: 'Nov 08, 2026, 11:20 AM',
+    createdAt: '2026-11-08T11:20:00.000Z',
+    status: 'picked_up',
+    statusLabel: 'Picked Up',
+    subtotal: 63500,
+    productDiscountTotal: 2000,
+    promotionDiscountAmount: 0,
+    totalAmount: 61500,
+    runnerName: 'Sadiq Ibrahim (Runner #R-12)',
+    runnerVehicle: 'Delivery Van · LND-883-XJ',
+    handedOverAt: 'Nov 08, 2026, 12:05 PM',
+    paymentConfirmed: true,
+    stockDeducted: true,
+    items: [
+      {
+        id: 'item-1004-1',
+        productId: 'prod-001',
+        name: 'Ofada rice (50kg)',
+        unit: 'Bag',
+        price: 45000,
+        quantity: 1,
+        image:
+          'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80',
+      },
+      {
+        id: 'item-1004-2',
+        productId: 'prod-006',
+        name: 'Mama Gold Pure Vegetable Oil (5L)',
+        unit: 'Litre (L)',
+        price: 18500,
+        discountPrice: 16500,
+        quantity: 1,
+        image:
+          'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=600&q=80',
+      },
+    ],
+    activityLog: [],
+  },
+  {
+    id: 'ord-1002',
+    orderNumber: '#ER-1002',
+    itemSummary: 'Prestige Non-Stick Cookware Set (7 Pcs)',
+    customerName: 'Damilola Ojo',
+    dateTime: 'Nov 07, 2026, 01:40 PM',
+    createdAt: '2026-11-07T13:40:00.000Z',
+    status: 'picked_up',
+    statusLabel: 'Picked Up',
+    subtotal: 62000,
+    productDiscountTotal: 0,
+    promotionDiscountAmount: 3000,
+    promotionName: '₦3,000 Off Large Orders (₦20,000+)',
+    totalAmount: 59000,
+    runnerName: 'Tunde Bakare (Runner #R-41)',
+    runnerVehicle: 'Dispatch Box Bike · LAG-492-QA',
+    handedOverAt: 'Nov 07, 2026, 02:20 PM',
+    paymentConfirmed: true,
+    stockDeducted: true,
+    items: [
+      {
+        id: 'item-1002-1',
+        productId: 'prod-009',
+        name: 'Prestige Non-Stick Cookware Set (7 Pcs)',
+        unit: 'Unit',
+        price: 62000,
+        quantity: 1,
+        image:
+          'https://images.unsplash.com/photo-1584990347449-39908cfad171?auto=format&fit=crop&w=600&q=80',
+      },
+    ],
+    activityLog: [],
+  },
+  {
+    id: 'ord-1001',
+    orderNumber: '#ER-1001',
+    itemSummary: 'Unisex Cotton Polo Shirt (Navy Blue / L)',
+    customerName: 'Bisi Adeyemi',
+    dateTime: 'Nov 06, 2026, 04:10 PM',
+    createdAt: '2026-11-06T16:10:00.000Z',
+    status: 'new_order',
+    statusLabel: 'New Order',
+    subtotal: 25000,
+    productDiscountTotal: 0,
+    promotionDiscountAmount: 0,
+    totalAmount: 25000,
+    paymentConfirmed: true,
+    stockDeducted: false,
+    items: [
+      {
+        id: 'item-1001-1',
+        productId: 'prod-007',
+        combinationId: 'cb-p3',
+        name: 'Unisex Cotton Polo Shirt',
+        selectedOptionsLabel: 'Colour: Navy Blue · Size: L',
+        unit: 'Piece',
+        price: 12500,
+        quantity: 2,
+        image:
+          'https://images.unsplash.com/photo-1581655353564-df123a1eb820?auto=format&fit=crop&w=600&q=80',
+      },
+    ],
+    activityLog: [],
+  },
+  {
+    id: 'ord-0995',
+    orderNumber: '#ER-0995',
+    itemSummary: 'Gino tomato paste, Palm oil (5kg)',
+    customerName: 'Ibrahim Musa',
+    dateTime: 'Nov 04, 2026, 12:30 PM',
+    createdAt: '2026-11-04T12:30:00.000Z',
+    status: 'picked_up',
+    statusLabel: 'Picked Up',
+    subtotal: 90000,
+    productDiscountTotal: 0,
+    promotionDiscountAmount: 9000,
+    promotionName: 'Weekend Groceries 10% Off',
+    totalAmount: 81000,
+    runnerName: 'Emeka Nwosu (Runner #R-18)',
+    runnerVehicle: 'Dispatch Box Bike · KJA-214-BA',
+    handedOverAt: 'Nov 04, 2026, 01:15 PM',
+    paymentConfirmed: true,
+    stockDeducted: true,
+    items: [
+      {
+        id: 'item-0995-1',
+        productId: 'prod-002',
+        name: 'Gino tomato paste',
+        unit: 'Carton',
+        price: 45000,
+        quantity: 1,
+        image:
+          'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?auto=format&fit=crop&w=600&q=80',
+      },
+      {
+        id: 'item-0995-2',
+        productId: 'prod-003',
+        name: 'Palm oil (5kg)',
+        unit: 'Kilogram (kg)',
+        price: 45000,
+        quantity: 1,
+        image:
+          'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=600&q=80',
+      },
+    ],
+    activityLog: [],
+  },
+];
+
+/**
+ * Default delivery-confirmation and refund states:
+ * - Note that `ord-1005` (Gbenga Adeleke) is 'Picked Up' in Orders, but delivery is NOT yet confirmed
+ *   (runner has not yet entered customer's confirmation code), so its funds remain 'in_escrow'.
+ * - `ord-1004` and `ord-1002` have verified customer delivery confirmation codes and are included in
+ *   automatic combined settlement `set-2026-1109` (currently 'processing'), so their funds are 'awaiting_settlement'.
+ * - `ord-0998` and `ord-0995` have verified customer delivery confirmation codes and are included in
+ *   completed combined settlement `set-2026-1106` ('paid'), so their funds are 'settled'.
+ * - `ord-1001` was refunded ('refunded').
+ */
+const DEFAULT_TX_METADATA: Record<string, TransactionMetadataOverride> = {
+  'ord-1004': {
+    paymentStatus: 'confirmed',
+    deliveryConfirmed: true,
+    deliveryConfirmedAt: 'Nov 08, 2026, 12:45 PM',
+    settlementId: 'set-2026-1109',
+    settlementStatus: 'processing',
+  },
+  'ord-1002': {
+    paymentStatus: 'confirmed',
+    deliveryConfirmed: true,
+    deliveryConfirmedAt: 'Nov 07, 2026, 03:10 PM',
+    settlementId: 'set-2026-1109',
+    settlementStatus: 'processing',
+  },
+  'ord-1001': {
+    paymentStatus: 'refunded',
+    refundedAmount: 25000,
+    deliveryConfirmed: false,
+  },
+  'ord-0998': {
+    paymentStatus: 'confirmed',
+    deliveryConfirmed: true,
+    deliveryConfirmedAt: 'Nov 05, 2026, 03:50 PM',
+    settlementId: 'set-2026-1106',
+    settlementStatus: 'paid',
+  },
+  'ord-0995': {
+    paymentStatus: 'confirmed',
+    deliveryConfirmed: true,
+    deliveryConfirmedAt: 'Nov 04, 2026, 02:05 PM',
+    settlementId: 'set-2026-1106',
+    settlementStatus: 'paid',
+  },
 };
+
+/**
+ * Default automatic combined settlements:
+ * - `set-2026-1109`: Processing settlement combining 2 delivered orders (`ord-1004` + `ord-1002` = ₦120,500)
+ * - `set-2026-1106`: Paid settlement combining 2 delivered orders (`ord-0998` + `ord-0995` = ₦116,000)
+ */
+const DEFAULT_SETTLEMENTS: SettlementRecord[] = [
+  {
+    id: 'set-2026-1109',
+    settlementDate: 'Nov 09, 2026',
+    createdAt: '2026-11-09T09:00:00.000Z',
+    processingDate: 'Nov 09, 2026, 09:00 AM',
+    paidDate: undefined,
+    settlementAmount: 120500,
+    status: 'processing',
+    transactionIds: ['ord-1004', 'ord-1002'],
+    orders: [],
+    bankName: MERCHANT_ONBOARDED_BANK.bankName,
+    maskedAccountNumber: MERCHANT_ONBOARDED_BANK.maskedAccountNumber,
+    accountName: MERCHANT_ONBOARDED_BANK.accountName,
+    transactionReference: undefined,
+  },
+  {
+    id: 'set-2026-1106',
+    settlementDate: 'Nov 06, 2026',
+    createdAt: '2026-11-06T14:18:00.000Z',
+    processingDate: 'Nov 06, 2026, 09:00 AM',
+    paidDate: 'Nov 06, 2026, 02:18 PM',
+    settlementAmount: 116000,
+    status: 'paid',
+    transactionIds: ['ord-0998', 'ord-0995'],
+    orders: [],
+    bankName: MERCHANT_ONBOARDED_BANK.bankName,
+    maskedAccountNumber: MERCHANT_ONBOARDED_BANK.maskedAccountNumber,
+    accountName: MERCHANT_ONBOARDED_BANK.accountName,
+    transactionReference: 'NIP-GTB-20261106-884120',
+  },
+];
 
 /**
  * Extracts calendar parts (year, month 1-12, day 1-31, hour 0-23) in the merchant's timezone (Africa/Lagos).
@@ -210,18 +439,12 @@ export function resolveReportingPeriodWindow(
       endDate = createMerchantTzDate(year, month, day, 23, 59, 59, 999);
       break;
     }
-    case 'yesterday': {
-      const todayStart = createMerchantTzDate(year, month, day, 0, 0, 0, 0);
-      const yest = new Date(todayStart.getTime() - 12 * 60 * 60 * 1000);
-      const yp = getMerchantTzParts(yest);
-      startDate = createMerchantTzDate(yp.year, yp.month, yp.day, 0, 0, 0, 0);
-      endDate = createMerchantTzDate(yp.year, yp.month, yp.day, 23, 59, 59, 999);
-      break;
-    }
     case 'last_7_days': {
       endDate = createMerchantTzDate(year, month, day, 23, 59, 59, 999);
       const todayStart = createMerchantTzDate(year, month, day, 0, 0, 0, 0);
-      const sixDaysAgo = new Date(todayStart.getTime() - 6 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000);
+      const sixDaysAgo = new Date(
+        todayStart.getTime() - 6 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000
+      );
       const sp = getMerchantTzParts(sixDaysAgo);
       startDate = createMerchantTzDate(sp.year, sp.month, sp.day, 0, 0, 0, 0);
       break;
@@ -240,7 +463,15 @@ export function resolveReportingPeriodWindow(
       startDate = createMerchantTzDate(year, month, 1, 0, 0, 0, 0);
       const nextMonthYear = month === 12 ? year + 1 : year;
       const nextMonth = month === 12 ? 1 : month + 1;
-      const firstOfNextMonth = createMerchantTzDate(nextMonthYear, nextMonth, 1, 0, 0, 0, 0);
+      const firstOfNextMonth = createMerchantTzDate(
+        nextMonthYear,
+        nextMonth,
+        1,
+        0,
+        0,
+        0,
+        0
+      );
       endDate = new Date(firstOfNextMonth.getTime() - 1);
       break;
     }
@@ -250,11 +481,6 @@ export function resolveReportingPeriodWindow(
       startDate = createMerchantTzDate(prevMonthYear, prevMonth, 1, 0, 0, 0, 0);
       const firstOfThisMonth = createMerchantTzDate(year, month, 1, 0, 0, 0, 0);
       endDate = new Date(firstOfThisMonth.getTime() - 1);
-      break;
-    }
-    case 'this_year': {
-      startDate = createMerchantTzDate(year, 1, 1, 0, 0, 0, 0);
-      endDate = createMerchantTzDate(year, 12, 31, 23, 59, 59, 999);
       break;
     }
     case 'custom': {
@@ -311,66 +537,25 @@ export function resolveReportingPeriodWindow(
 }
 
 /**
- * Calculates applicable merchant fee for a given post-discount order amount based on actual MerchantFeeConfig.
- * Returns 0 when no fee config is active.
- */
-export function calculateMerchantFee(
-  postDiscountAmount: number,
-  feeConfig: MerchantFeeConfig
-): { amount: number; label?: string } {
-  if (!feeConfig.isConfigured || postDiscountAmount <= 0) {
-    return { amount: 0, label: undefined };
-  }
-
-  let fee = 0;
-  const parts: string[] = [];
-
-  if (
-    typeof feeConfig.commissionPercentage === 'number' &&
-    feeConfig.commissionPercentage > 0
-  ) {
-    fee += Math.round((postDiscountAmount * feeConfig.commissionPercentage) / 100);
-    parts.push(`${feeConfig.commissionPercentage}% commission`);
-  }
-
-  if (
-    typeof feeConfig.fixedFeePerTransaction === 'number' &&
-    feeConfig.fixedFeePerTransaction > 0
-  ) {
-    fee += feeConfig.fixedFeePerTransaction;
-    parts.push(`${formatNaira(feeConfig.fixedFeePerTransaction)} flat fee`);
-  }
-
-  if (
-    typeof feeConfig.feeCapAmount === 'number' &&
-    feeConfig.feeCapAmount > 0 &&
-    fee > feeConfig.feeCapAmount
-  ) {
-    fee = feeConfig.feeCapAmount;
-    parts.push(`capped at ${formatNaira(feeConfig.feeCapAmount)}`);
-  }
-
-  return {
-    amount: Math.min(postDiscountAmount, Math.max(0, fee)),
-    label: parts.length > 0 ? parts.join(' + ') : undefined,
-  };
-}
-
-/**
- * Converts an Order record into a canonical SalesTransaction using actual prices, discounts,
- * backend payment confirmation status, and fee/settlement records.
+ * Converts an Order record into a canonical SalesTransaction using actual listed product prices,
+ * merchant product/promotion discounts, payment confirmation status, runner delivery confirmation
+ * (customer confirmation code verification), and combined settlement records.
+ *
+ * Strictly enforces:
+ * - No merchant commission or platform fee deductions.
+ * - Order status 'picked_up' does NOT automatically mark deliveryConfirmed = true.
+ * - A transaction is only 'settled' when its linked settlement has status 'paid'.
  */
 export function mapOrderToTransaction(
   order: Order,
-  feeConfig: MerchantFeeConfig,
   metaMap: Record<string, TransactionMetadataOverride>,
   settlements: SettlementRecord[]
 ): SalesTransaction {
   const txId = `tx-${order.id}`;
   const override = metaMap[order.id] || metaMap[txId] || {};
 
-  // Calculate gross product value from actual order items
-  const grossAmount =
+  // Calculate product subtotal from merchant's listed item prices
+  const productSubtotal =
     order.items && order.items.length > 0
       ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
       : order.subtotal || 0;
@@ -392,65 +577,70 @@ export function mapOrderToTransaction(
 
   const promotionDiscountAmount = order.promotionDiscountAmount || 0;
   const totalDiscounts = Math.min(
-    grossAmount,
+    productSubtotal,
     productDiscountAmount + promotionDiscountAmount
   );
-  const postDiscountOrderValue = Math.max(0, grossAmount - totalDiscounts);
 
-  // Determine transaction status from actual backend payment confirmation & recorded overrides
-  const hasBackendConfirmationEvent =
-    order.paymentConfirmed === true &&
-    (!order.activityLog ||
-      order.activityLog.length === 0 ||
-      order.activityLog.some((e) =>
-        e.description?.toLowerCase().includes('payment confirmed')
-      ) ||
-      order.paymentConfirmed === true);
+  // Order Value = Product Subtotal − Applicable Product Discounts
+  const orderValue = Math.max(0, productSubtotal - totalDiscounts);
 
-  const status: TransactionStatus =
-    override.status ?? (hasBackendConfirmationEvent ? 'successful' : 'pending');
+  // Determine Payment Status
+  const paymentStatus: PaymentStatus =
+    override.paymentStatus ??
+    (order.paymentConfirmed === true ? 'confirmed' : 'pending');
 
-  // Determine applicable merchant fees (0 when unconfigured)
-  const computedFee = calculateMerchantFee(postDiscountOrderValue, feeConfig);
-  const merchantFeeAmount =
-    typeof override.merchantFeeAmount === 'number'
-      ? override.merchantFeeAmount
-      : status === 'failed' || status === 'pending' || status === 'refunded'
-      ? 0
-      : computedFee.amount;
-
-  const merchantFeeLabel = override.merchantFeeLabel ?? computedFee.label;
-
-  // Handle full or partial refunds accurately
+  // Handle refunds accurately
   const refundedAmount =
-    status === 'refunded'
-      ? postDiscountOrderValue
-      : status === 'partially_refunded'
-      ? Math.min(
-          postDiscountOrderValue,
-          Math.max(0, override.refundedAmount || 0)
-        )
+    paymentStatus === 'refunded'
+      ? override.refundedAmount !== undefined
+        ? Math.min(orderValue, Math.max(0, override.refundedAmount))
+        : orderValue
+      : override.refundedAmount
+      ? Math.min(orderValue, Math.max(0, override.refundedAmount))
       : 0;
 
-  // Net transaction amount
+  // Effective merchant earnings from this transaction (no platform fees deducted)
   const netAmount =
-    status === 'refunded' || status === 'failed'
+    paymentStatus === 'refunded' ||
+    paymentStatus === 'failed' ||
+    paymentStatus === 'pending'
       ? 0
-      : Math.max(
-          0,
-          postDiscountOrderValue - merchantFeeAmount - refundedAmount
-        );
+      : Math.max(0, orderValue - refundedAmount);
 
-  // Match against actual settlement records to prevent double-counting
+  // Match against actual combined settlement records
   const linkedSettlement = settlements.find(
     (s) =>
       s.transactionIds.includes(txId) || s.transactionIds.includes(order.id)
   );
 
   const settlementId = override.settlementId ?? linkedSettlement?.id;
-  const settlementStatus: SettlementStatus | 'unsettled' =
-    override.settlementStatus ??
-    (linkedSettlement ? linkedSettlement.status : 'unsettled');
+  const settlementStatus: SettlementStatus | undefined =
+    linkedSettlement?.status ?? override.settlementStatus;
+
+  // Delivery completion is strictly separate from merchant 'Picked Up' status.
+  // It is only true when customer confirmation code verification is recorded.
+  const deliveryConfirmed =
+    paymentStatus === 'confirmed' && override.deliveryConfirmed === true;
+
+  // Determine Funds Status based on payment, escrow, delivery confirmation, and settlement state
+  let fundsStatus: FundsStatus;
+  if (paymentStatus === 'refunded') {
+    fundsStatus = 'refunded';
+  } else if (
+    paymentStatus === 'Confirmed'.toLowerCase() ||
+    paymentStatus === 'confirmed'
+  ) {
+    if (!deliveryConfirmed) {
+      fundsStatus = 'in_escrow';
+    } else if (settlementStatus === 'paid') {
+      fundsStatus = 'settled';
+    } else {
+      // Delivery is confirmed; funds are either waiting for or currently in an automatic settlement
+      fundsStatus = 'awaiting_settlement';
+    }
+  } else {
+    fundsStatus = 'in_escrow';
+  }
 
   return {
     id: txId,
@@ -460,19 +650,72 @@ export function mapOrderToTransaction(
     items: order.items,
     dateTime: order.dateTime,
     createdAt: order.createdAt,
-    status,
-    grossAmount,
+    paymentStatus,
+    paymentConfirmedAt:
+      paymentStatus === 'confirmed' ? order.dateTime : undefined,
+    fundsStatus,
+    orderStatusLabel: order.statusLabel,
+    runnerName: order.runnerName,
+    handedOverAt: order.handedOverAt,
+    deliveryConfirmed,
+    deliveryConfirmedAt: deliveryConfirmed
+      ? override.deliveryConfirmedAt
+      : undefined,
+    productSubtotal,
     productDiscountAmount,
     promotionDiscountAmount,
     promotionName: order.promotionName,
     totalDiscounts,
-    merchantFeeAmount,
-    merchantFeeLabel,
+    orderValue,
     refundedAmount,
     netAmount,
     settlementId,
     settlementStatus,
   };
+}
+
+/**
+ * Hydrates each SettlementRecord with the full details of its included orders
+ * and ensures `settlementAmount` equals the exact sum of the included orders' merchant earnings.
+ */
+export function hydrateSettlementsWithOrders(
+  rawSettlements: SettlementRecord[],
+  allTransactions: SalesTransaction[]
+): SettlementRecord[] {
+  return rawSettlements.map((settlement) => {
+    const matchedTransactions = allTransactions.filter(
+      (tx) =>
+        settlement.transactionIds.includes(tx.id) ||
+        settlement.transactionIds.includes(tx.sourceOrderId)
+    );
+
+    const includedOrders: SettlementIncludedOrder[] = matchedTransactions.map(
+      (tx) => ({
+        transactionId: tx.id,
+        orderId: tx.sourceOrderId,
+        customerName: tx.customerName,
+        itemSummary: tx.itemSummary,
+        orderDate: tx.dateTime,
+        createdAt: tx.createdAt,
+        deliveryConfirmedAt: tx.deliveryConfirmedAt,
+        orderAmount: tx.netAmount,
+      })
+    );
+
+    const calculatedTotal = includedOrders.reduce(
+      (sum, item) => sum + item.orderAmount,
+      0
+    );
+
+    return {
+      ...settlement,
+      orders: includedOrders,
+      settlementAmount:
+        includedOrders.length > 0
+          ? calculatedTotal
+          : settlement.settlementAmount,
+    };
+  });
 }
 
 /**
@@ -506,124 +749,138 @@ export function filterSettlementsByWindow(
 }
 
 /**
- * Single source of truth financial calculation engine used across
- * Overview, Transactions, Settlements, and Reports.
+ * Calculates Overview summary metrics for the selected date range:
+ * 1. Total Sales: Total value of successfully paid product orders within the selected date range, adjusted for applicable refunds.
+ * 2. Awaiting Release: Merchant product earnings from successfully paid orders whose delivery has not yet been confirmed and whose funds remain in escrow.
+ * 3. Released: Merchant funds that have been successfully paid out through completed settlements.
+ * 4. Total Orders: Number of successfully paid orders within the selected date range.
  *
- * Rules enforced:
- * - Only 'successful' and 'partially_refunded' transactions count toward Gross Sales, Discounts, Fees, and Net Earnings.
- * - 'pending', 'failed', and fully 'refunded' transactions are never counted as successful sales.
- * - For 'partially_refunded' transactions, the actual `refundedAmount` is deducted from Net Earnings.
- * - Delivery fees and customer service fees are never included or deducted.
- * - Pending or processing settlements are never counted as Total Settled.
- * - Settlement totals never double-count transactions across settlement periods.
+ * Ensures zero double-counting:
+ * `awaitingRelease (In Escrow) + awaitingSettlement (Processing/Ready) + released (Settled) === totalSales`
  */
-export function calculateFinancialMetrics(
-  periodTransactions: SalesTransaction[],
-  periodSettlements: SettlementRecord[],
-  feeConfig: MerchantFeeConfig
-): FinancialOverviewMetrics {
-  const qualifyingTransactions = periodTransactions.filter(
-    (tx) => tx.status === 'successful' || tx.status === 'partially_refunded'
-  );
-
-  let grossSales = 0;
-  let productDiscounts = 0;
-  let promotionDiscounts = 0;
-  let totalDiscounts = 0;
-  let feesAndCommissions = 0;
+export function calculateOverviewMetrics(
+  periodTransactions: SalesTransaction[]
+): OverviewSummaryMetrics {
+  let totalSales = 0;
+  let awaitingRelease = 0;
+  let awaitingSettlement = 0;
+  let released = 0;
+  let totalOrders = 0;
+  let inEscrowOrderCount = 0;
+  let awaitingSettlementOrderCount = 0;
+  let releasedOrderCount = 0;
   let refundedTotal = 0;
-  let netEarnings = 0;
 
-  // Track which qualifying transactions are already covered by a PAID settlement
-  const paidSettlementIds = new Set(
-    periodSettlements.filter((s) => s.status === 'paid').map((s) => s.id)
-  );
-  const settledTxIds = new Set<string>();
-  for (const s of periodSettlements) {
-    if (s.status === 'paid') {
-      s.transactionIds.forEach((id) => settledTxIds.add(id));
+  for (const tx of periodTransactions) {
+    if (tx.refundedAmount > 0) {
+      refundedTotal += tx.refundedAmount;
+    }
+
+    if (tx.paymentStatus === 'confirmed' && tx.netAmount > 0) {
+      totalOrders += 1;
+      totalSales += tx.netAmount;
+
+      if (tx.fundsStatus === 'in_escrow') {
+        awaitingRelease += tx.netAmount;
+        inEscrowOrderCount += 1;
+      } else if (tx.fundsStatus === 'awaiting_settlement') {
+        awaitingSettlement += tx.netAmount;
+        awaitingSettlementOrderCount += 1;
+      } else if (tx.fundsStatus === 'settled') {
+        released += tx.netAmount;
+        releasedOrderCount += 1;
+      }
     }
   }
 
-  let settledFromTransactions = 0;
-  let pendingFromTransactions = 0;
+  return {
+    totalSales,
+    awaitingRelease,
+    awaitingSettlement,
+    released,
+    totalOrders,
+    inEscrowOrderCount,
+    awaitingSettlementOrderCount,
+    releasedOrderCount,
+    refundedTotal,
+  };
+}
 
-  for (const tx of qualifyingTransactions) {
-    grossSales += tx.grossAmount;
-    productDiscounts += tx.productDiscountAmount;
-    promotionDiscounts += tx.promotionDiscountAmount;
-    totalDiscounts += tx.totalDiscounts;
-    feesAndCommissions += tx.merchantFeeAmount;
-    refundedTotal += tx.refundedAmount;
-    netEarnings += tx.netAmount;
-
-    const isPaidSettled =
-      tx.settlementStatus === 'paid' ||
-      (tx.settlementId && paidSettlementIds.has(tx.settlementId)) ||
-      settledTxIds.has(tx.id) ||
-      settledTxIds.has(tx.sourceOrderId);
-
-    if (isPaidSettled) {
-      settledFromTransactions += tx.netAmount;
-    } else {
-      pendingFromTransactions += tx.netAmount;
-    }
-  }
-
-  // Also check if there are standalone paid settlements in the period whose transactions weren't in periodTransactions
-  const standalonePaidSettlements = periodSettlements.filter(
-    (s) =>
-      s.status === 'paid' &&
-      !qualifyingTransactions.some(
-        (tx) =>
-          tx.settlementId === s.id ||
-          s.transactionIds.includes(tx.id) ||
-          s.transactionIds.includes(tx.sourceOrderId)
-      )
+/**
+ * Calculates Settlements view summary metrics:
+ * 1. Awaiting Release: Funds still held in escrow because delivery has not yet been confirmed.
+ * 2. Processing: Funds included in an automatic settlement that is currently being processed.
+ * 3. Successfully Paid: Funds successfully transferred to the merchant's bank account.
+ */
+export function calculateSettlementSummaryMetrics(
+  transactions: SalesTransaction[],
+  settlements: SettlementRecord[]
+): SettlementSummaryMetrics {
+  const inEscrowTxs = transactions.filter(
+    (tx) => tx.paymentStatus === 'confirmed' && tx.fundsStatus === 'in_escrow'
   );
-
-  const additionalSettled = standalonePaidSettlements.reduce(
-    (sum, s) => sum + s.netSettlementAmount,
+  const awaitingRelease = inEscrowTxs.reduce(
+    (sum, tx) => sum + tx.netAmount,
     0
   );
 
-  const totalSettled = settledFromTransactions + additionalSettled;
-  const pendingSettlement = pendingFromTransactions;
-  const qualifyingOrderCount = qualifyingTransactions.length;
-  const averageOrderValue =
-    qualifyingOrderCount > 0
-      ? Math.round(netEarnings / qualifyingOrderCount)
-      : 0;
+  const processingSettlements = settlements.filter(
+    (s) => s.status === 'processing'
+  );
+  const processing = processingSettlements.reduce(
+    (sum, s) => sum + s.settlementAmount,
+    0
+  );
+  const processingOrderCount = processingSettlements.reduce(
+    (sum, s) => sum + s.transactionIds.length,
+    0
+  );
+
+  // Delivered orders not yet attached to a processing or paid settlement
+  const readyTxs = transactions.filter(
+    (tx) =>
+      tx.paymentStatus === 'confirmed' &&
+      tx.fundsStatus === 'awaiting_settlement' &&
+      !tx.settlementId
+  );
+  const readyForSettlement = readyTxs.reduce(
+    (sum, tx) => sum + tx.netAmount,
+    0
+  );
+
+  const paidSettlements = settlements.filter((s) => s.status === 'paid');
+  const successfullyPaid = paidSettlements.reduce(
+    (sum, s) => sum + s.settlementAmount,
+    0
+  );
+  const paidOrderCount = paidSettlements.reduce(
+    (sum, s) => sum + s.transactionIds.length,
+    0
+  );
 
   return {
-    grossSales,
-    productDiscounts,
-    promotionDiscounts,
-    totalDiscounts,
-    feesAndCommissions,
-    isFeeConfigAvailable:
-      feeConfig.isConfigured || feesAndCommissions > 0,
-    refundedTotal,
-    netEarnings,
-    pendingSettlement,
-    totalSettled,
-    qualifyingOrderCount,
-    averageOrderValue,
+    awaitingRelease,
+    awaitingReleaseCount: inEscrowTxs.length,
+    processing,
+    processingSettlementCount: processingSettlements.length,
+    processingOrderCount,
+    readyForSettlement,
+    readyForSettlementCount: readyTxs.length,
+    successfullyPaid,
+    paidSettlementCount: paidSettlements.length,
+    paidOrderCount,
   };
 }
 
 /**
  * Generates time-bucketed chart data for the selected reporting period in Africa/Lagos timezone.
- * - Today / Yesterday (or custom <= 2 days): 3-hour time intervals across the day
- * - Last 7 Days / Last 30 Days / This Month / Last Month (or custom <= 45 days): Daily intervals
- * - This Year (or custom > 45 days): Monthly intervals
  */
 export function buildSalesChartBuckets(
   periodTransactions: SalesTransaction[],
   window: DateRangeWindow
 ): SalesChartBucket[] {
   const qualifying = periodTransactions.filter(
-    (tx) => tx.status === 'successful' || tx.status === 'partially_refunded'
+    (tx) => tx.paymentStatus === 'confirmed' && tx.netAmount > 0
   );
 
   const spanDays = Math.max(
@@ -634,12 +891,8 @@ export function buildSalesChartBuckets(
     )
   );
 
-  // 1. Hourly buckets for single-day periods (Today / Yesterday)
-  if (
-    window.preset === 'today' ||
-    window.preset === 'yesterday' ||
-    spanDays <= 1
-  ) {
+  // 1. Hourly buckets for single-day periods (Today or 1-day custom range)
+  if (window.preset === 'today' || spanDays <= 1) {
     const blocks = [
       { startHour: 0, endHour: 2, label: '12am', full: '12:00 AM – 02:59 AM' },
       { startHour: 3, endHour: 5, label: '3am', full: '03:00 AM – 05:59 AM' },
@@ -663,17 +916,14 @@ export function buildSalesChartBuckets(
         key: `hr-${b.startHour}`,
         label: b.label,
         fullLabel: `${dateFormatted}, ${b.full}`,
-        grossSales: matching.reduce((s, t) => s + t.grossAmount, 0),
-        discounts: matching.reduce((s, t) => s + t.totalDiscounts, 0),
-        fees: matching.reduce((s, t) => s + t.merchantFeeAmount, 0),
-        netSales: matching.reduce((s, t) => s + t.netAmount, 0),
+        salesAmount: matching.reduce((s, t) => s + t.netAmount, 0),
         orderCount: matching.length,
       };
     });
   }
 
-  // 2. Monthly buckets for This Year or > 45 days custom ranges
-  if (window.preset === 'this_year' || spanDays > 45) {
+  // 2. Monthly buckets for > 45 days custom ranges
+  if (spanDays > 45) {
     const startParts = getMerchantTzParts(window.startDate);
     const endParts = getMerchantTzParts(window.endDate);
     const buckets: SalesChartBucket[] = [];
@@ -705,10 +955,7 @@ export function buildSalesChartBuckets(
         key: monthKey,
         label: shortMonth,
         fullLabel: fullMonth,
-        grossSales: matching.reduce((s, t) => s + t.grossAmount, 0),
-        discounts: matching.reduce((s, t) => s + t.totalDiscounts, 0),
-        fees: matching.reduce((s, t) => s + t.merchantFeeAmount, 0),
-        netSales: matching.reduce((s, t) => s + t.netAmount, 0),
+        salesAmount: matching.reduce((s, t) => s + t.netAmount, 0),
         orderCount: matching.length,
       });
 
@@ -746,10 +993,7 @@ export function buildSalesChartBuckets(
       key: parts.dateKey,
       label: formatDayLabel(cursor, true),
       fullLabel: formatDayLabel(cursor, false),
-      grossSales: matching.reduce((s, t) => s + t.grossAmount, 0),
-      discounts: matching.reduce((s, t) => s + t.totalDiscounts, 0),
-      fees: matching.reduce((s, t) => s + t.merchantFeeAmount, 0),
-      netSales: matching.reduce((s, t) => s + t.netAmount, 0),
+      salesAmount: matching.reduce((s, t) => s + t.netAmount, 0),
       orderCount: matching.length,
     });
 
@@ -760,14 +1004,13 @@ export function buildSalesChartBuckets(
 }
 
 /**
- * Aggregates product-level sales performance across qualifying transactions.
- * Reconciles product-level gross sales, product discounts, allocated promotion discounts, and net sales value.
+ * Aggregates top-selling products across confirmed orders in the selected period.
  */
 export function calculateProductPerformance(
   periodTransactions: SalesTransaction[]
 ): ProductSalesPerformanceItem[] {
   const qualifying = periodTransactions.filter(
-    (tx) => tx.status === 'successful' || tx.status === 'partially_refunded'
+    (tx) => tx.paymentStatus === 'confirmed' && tx.netAmount > 0
   );
 
   const map = new Map<
@@ -780,9 +1023,7 @@ export function calculateProductPerformance(
       image?: string;
       orderIds: Set<string>;
       quantitySold: number;
-      grossSalesValue: number;
-      productDiscountsApplied: number;
-      promotionDiscountsAllocated: number;
+      salesValue: number;
     }
   >();
 
@@ -818,13 +1059,16 @@ export function calculateProductPerformance(
             )
           : 0;
 
+      const lineSalesValue = Math.max(
+        0,
+        lineAfterProdDiscount - linePromoDiscount
+      );
+
       const existing = map.get(key);
       if (existing) {
         existing.orderIds.add(tx.id);
         existing.quantitySold += item.quantity;
-        existing.grossSalesValue += lineGross;
-        existing.productDiscountsApplied += lineProductDiscount;
-        existing.promotionDiscountsAllocated += linePromoDiscount;
+        existing.salesValue += lineSalesValue;
       } else {
         map.set(key, {
           productKey: key,
@@ -834,185 +1078,37 @@ export function calculateProductPerformance(
           image: item.image,
           orderIds: new Set([tx.id]),
           quantitySold: item.quantity,
-          grossSalesValue: lineGross,
-          productDiscountsApplied: lineProductDiscount,
-          promotionDiscountsAllocated: linePromoDiscount,
+          salesValue: lineSalesValue,
         });
       }
     }
   }
 
   return Array.from(map.values())
-    .map((entry) => {
-      const totalDiscounts =
-        entry.productDiscountsApplied + entry.promotionDiscountsAllocated;
-      return {
-        productKey: entry.productKey,
-        productId: entry.productId,
-        productName: entry.productName,
-        unit: entry.unit,
-        image: entry.image,
-        ordersCount: entry.orderIds.size,
-        quantitySold: entry.quantitySold,
-        grossSalesValue: entry.grossSalesValue,
-        productDiscountsApplied: entry.productDiscountsApplied,
-        promotionDiscountsAllocated: entry.promotionDiscountsAllocated,
-        totalDiscounts,
-        netSalesValue: Math.max(0, entry.grossSalesValue - totalDiscounts),
-      };
-    })
-    .sort((a, b) => b.netSalesValue - a.netSalesValue);
-}
-
-/**
- * Computes sales trend comparison against the immediately preceding equivalent period.
- * Strictly checks whether actual historical transaction records exist in the prior equivalent period.
- * Never fabricates percentage growth or trends when historical data is absent.
- */
-export function calculatePeriodComparison(
-  allTransactions: SalesTransaction[],
-  currentWindow: DateRangeWindow
-): PeriodComparisonInsight {
-  const durationMs =
-    currentWindow.endDate.getTime() - currentWindow.startDate.getTime() + 1;
-  const prevEnd = new Date(currentWindow.startDate.getTime() - 1);
-  const prevStart = new Date(prevEnd.getTime() - durationMs + 1);
-
-  const prevWindow: DateRangeWindow = {
-    preset: currentWindow.preset,
-    startDate: prevStart,
-    endDate: prevEnd,
-    label: 'Previous Period',
-    formattedRange: `${formatShortDate(prevStart)} – ${formatShortDate(prevEnd)}`,
-    timezoneLabel: MERCHANT_TIMEZONE_LABEL,
-  };
-
-  const currentQualifying = filterTransactionsByWindow(
-    allTransactions,
-    currentWindow
-  ).filter(
-    (tx) => tx.status === 'successful' || tx.status === 'partially_refunded'
-  );
-
-  const previousQualifying = filterTransactionsByWindow(
-    allTransactions,
-    prevWindow
-  ).filter(
-    (tx) => tx.status === 'successful' || tx.status === 'partially_refunded'
-  );
-
-  const currentPeriodNetSales = currentQualifying.reduce(
-    (s, t) => s + t.netAmount,
-    0
-  );
-  const previousPeriodNetSales = previousQualifying.reduce(
-    (s, t) => s + t.netAmount,
-    0
-  );
-
-  if (previousQualifying.length === 0 || previousPeriodNetSales === 0) {
-    return {
-      hasSufficientHistoricalData: false,
-      currentPeriodNetSales,
-      previousPeriodNetSales: 0,
-      currentPeriodOrders: currentQualifying.length,
-      previousPeriodOrders: 0,
-      percentageChange: null,
-      previousPeriodLabel: prevWindow.formattedRange,
-      reasonIfUnavailable: `No recorded transactions exist in the preceding equivalent period (${prevWindow.formattedRange}) to compute a verified percentage trend.`,
-    };
-  }
-
-  const percentageChange = Number(
-    (
-      ((currentPeriodNetSales - previousPeriodNetSales) /
-        previousPeriodNetSales) *
-      100
-    ).toFixed(1)
-  );
-
-  return {
-    hasSufficientHistoricalData: true,
-    currentPeriodNetSales,
-    previousPeriodNetSales,
-    currentPeriodOrders: currentQualifying.length,
-    previousPeriodOrders: previousQualifying.length,
-    percentageChange,
-    previousPeriodLabel: prevWindow.formattedRange,
-  };
-}
-
-/**
- * Escapes a value for safe CSV export.
- */
-function escapeCsvCell(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return '""';
-  const str = String(value).replace(/"/g, '""');
-  return `"${str}"`;
-}
-
-/**
- * Generates a UTF-8 CSV string from column headers and row arrays.
- */
-export function buildCsvContent(
-  headers: string[],
-  rows: Array<Array<string | number | null | undefined>>
-): string {
-  const headerLine = headers.map(escapeCsvCell).join(',');
-  const dataLines = rows.map((row) => row.map(escapeCsvCell).join(','));
-  return [headerLine, ...dataLines].join('\r\n');
+    .map((entry) => ({
+      productKey: entry.productKey,
+      productId: entry.productId,
+      productName: entry.productName,
+      unit: entry.unit,
+      image: entry.image,
+      ordersCount: entry.orderIds.size,
+      quantitySold: entry.quantitySold,
+      salesValue: entry.salesValue,
+    }))
+    .sort((a, b) => b.salesValue - a.salesValue);
 }
 
 export const SalesStorage = {
-  getFeeConfig(): MerchantFeeConfig {
-    try {
-      const stored = localStorage.getItem(FEE_CONFIG_STORAGE_KEY);
-      if (!stored) return DEFAULT_FEE_CONFIG;
-      return JSON.parse(stored);
-    } catch {
-      return DEFAULT_FEE_CONFIG;
-    }
-  },
-
-  saveFeeConfig(config: MerchantFeeConfig): void {
-    try {
-      localStorage.setItem(FEE_CONFIG_STORAGE_KEY, JSON.stringify(config));
-      window.dispatchEvent(new CustomEvent('errandify:sales-updated'));
-    } catch (e) {
-      console.error('Failed to save fee config', e);
-    }
-  },
-
-  getSettlementSchedule(): MerchantSettlementSchedule {
-    try {
-      const stored = localStorage.getItem(SETTLEMENT_SCHEDULE_STORAGE_KEY);
-      if (!stored) return DEFAULT_SETTLEMENT_SCHEDULE;
-      return JSON.parse(stored);
-    } catch {
-      return DEFAULT_SETTLEMENT_SCHEDULE;
-    }
-  },
-
-  saveSettlementSchedule(schedule: MerchantSettlementSchedule): void {
-    try {
-      localStorage.setItem(
-        SETTLEMENT_SCHEDULE_STORAGE_KEY,
-        JSON.stringify(schedule)
-      );
-      window.dispatchEvent(new CustomEvent('errandify:sales-updated'));
-    } catch (e) {
-      console.error('Failed to save settlement schedule', e);
-    }
-  },
-
-  getSettlements(): SettlementRecord[] {
+  getRawSettlements(): SettlementRecord[] {
     try {
       const stored = localStorage.getItem(SETTLEMENTS_STORAGE_KEY);
-      if (!stored) return [];
+      if (!stored) {
+        return DEFAULT_SETTLEMENTS;
+      }
       const parsed: SettlementRecord[] = JSON.parse(stored);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed : DEFAULT_SETTLEMENTS;
     } catch {
-      return [];
+      return DEFAULT_SETTLEMENTS;
     }
   },
 
@@ -1031,10 +1127,13 @@ export const SalesStorage = {
   getTransactionMetadataMap(): Record<string, TransactionMetadataOverride> {
     try {
       const stored = localStorage.getItem(TX_META_STORAGE_KEY);
-      if (!stored) return {};
-      return JSON.parse(stored);
+      if (!stored) {
+        return { ...DEFAULT_TX_METADATA };
+      }
+      const parsed = JSON.parse(stored);
+      return { ...DEFAULT_TX_METADATA, ...parsed };
     } catch {
-      return {};
+      return { ...DEFAULT_TX_METADATA };
     }
   },
 
@@ -1050,23 +1149,37 @@ export const SalesStorage = {
   },
 
   /**
-   * Returns all merchant transactions derived directly from actual store orders,
-   * fee configuration, and settlement records.
+   * Returns all merchant transactions derived from store orders and historical records,
+   * mapped with payment status, escrow/delivery-confirmation status, and combined settlement records.
    */
   getTransactions(): SalesTransaction[] {
-    const orders = OrderStorage.getOrders();
-    const feeConfig = this.getFeeConfig();
-    const metaMap = this.getTransactionMetadataMap();
-    const settlements = this.getSettlements();
+    const activeOrders = OrderStorage.getOrders();
+    const seenIds = new Set(activeOrders.map((o) => o.id));
+    const combinedOrders: Order[] = [
+      ...activeOrders,
+      ...HISTORICAL_DELIVERED_ORDERS.filter((o) => !seenIds.has(o.id)),
+    ];
 
-    return orders
-      .map((order) =>
-        mapOrderToTransaction(order, feeConfig, metaMap, settlements)
-      )
+    const metaMap = this.getTransactionMetadataMap();
+    const rawSettlements = this.getRawSettlements();
+
+    return combinedOrders
+      .map((order) => mapOrderToTransaction(order, metaMap, rawSettlements))
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
   },
-};
 
+  /**
+   * Returns all automatic combined settlements hydrated with the individual orders included in each settlement.
+   */
+  getSettlements(): SettlementRecord[] {
+    const transactions = this.getTransactions();
+    const rawSettlements = this.getRawSettlements();
+    return hydrateSettlementsWithOrders(rawSettlements, transactions).sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  },
+};

@@ -1,31 +1,37 @@
 import type { OrderItem } from './order';
 
-export type SalesSubTab = 'overview' | 'transactions' | 'settlements' | 'reports';
+export type SalesSubTab = 'overview' | 'transactions' | 'settlements';
 
 export type ReportingPeriodPreset =
   | 'today'
-  | 'yesterday'
   | 'last_7_days'
   | 'last_30_days'
   | 'this_month'
   | 'last_month'
-  | 'this_year'
   | 'custom';
 
-export type TransactionStatus =
-  | 'successful'
-  | 'pending'
-  | 'failed'
-  | 'refunded'
-  | 'partially_refunded';
+/**
+ * Payment status of a customer order transaction.
+ */
+export type PaymentStatus = 'confirmed' | 'pending' | 'failed' | 'refunded';
 
-export type SettlementStatus = 'pending' | 'processing' | 'paid' | 'failed';
+/**
+ * Status of the merchant's funds for an order across the escrow and settlement lifecycle:
+ * - 'in_escrow': Order has been paid for, but customer delivery confirmation code has not yet been verified.
+ * - 'awaiting_settlement': Delivery has been confirmed via customer code, and funds are ready for or currently in an automatic settlement.
+ * - 'settled': Funds have been successfully paid to the merchant through a completed settlement.
+ * - 'refunded': The relevant order amount has been refunded.
+ */
+export type FundsStatus =
+  | 'in_escrow'
+  | 'awaiting_settlement'
+  | 'settled'
+  | 'refunded';
 
-export type ReportCategory =
-  | 'sales_report'
-  | 'transaction_report'
-  | 'earnings_report'
-  | 'product_performance_report';
+/**
+ * Status of an automatic combined merchant settlement.
+ */
+export type SettlementStatus = 'processing' | 'paid' | 'failed';
 
 export interface DateRangeWindow {
   preset: ReportingPeriodPreset;
@@ -37,32 +43,14 @@ export interface DateRangeWindow {
 }
 
 /**
- * Represents the merchant's configured commission and fee structure.
- * If no commission or fee arrangement is configured in the project/backend,
- * `isConfigured` is false and no fabricated deductions are applied.
- */
-export interface MerchantFeeConfig {
-  isConfigured: boolean;
-  commissionPercentage: number | null;
-  fixedFeePerTransaction: number | null;
-  feeCapAmount?: number | null;
-  description: string;
-}
-
-/**
- * Represents the merchant's scheduled payout configuration.
- * Only populated when an actual settlement schedule is configured.
- */
-export interface MerchantSettlementSchedule {
-  isConfigured: boolean;
-  frequencyLabel?: string;
-  nextScheduledDateIso?: string;
-  nextScheduledFormatted?: string;
-}
-
-/**
- * Financial transaction record derived from actual merchant orders and payment confirmations.
- * Does not expose order numbers/references or sensitive customer contact details in merchant tables.
+ * Individual customer order transaction and its payment, escrow, delivery confirmation,
+ * and automatic settlement state.
+ *
+ * Business rules:
+ * - Merchants receive the full amount they listed their products for (adjusted for merchant product/promotion discounts).
+ * - Errandify's customer-facing charge is never deducted from merchant earnings.
+ * - Funds remain in escrow ('in_escrow') until the runner verifies the customer's delivery confirmation code.
+ * - 'Picked Up' in the Orders section only indicates runner collection, not delivery completion.
  */
 export interface SalesTransaction {
   id: string;
@@ -72,72 +60,87 @@ export interface SalesTransaction {
   items: OrderItem[];
   dateTime: string;
   createdAt: string; // ISO 8601 timestamp
-  status: TransactionStatus;
-  grossAmount: number; // Product subtotal before discounts
+  paymentStatus: PaymentStatus;
+  paymentConfirmedAt?: string;
+  fundsStatus: FundsStatus;
+  orderStatusLabel?: string;
+  runnerName?: string;
+  handedOverAt?: string;
+  deliveryConfirmed: boolean;
+  deliveryConfirmedAt?: string;
+  productSubtotal: number; // Product subtotal before discounts
   productDiscountAmount: number;
   promotionDiscountAmount: number;
   promotionName?: string;
   totalDiscounts: number; // productDiscountAmount + promotionDiscountAmount
-  merchantFeeAmount: number; // Applicable merchant-side fee/commission (0 when unconfigured)
-  merchantFeeLabel?: string;
-  refundedAmount: number; // Actual refunded amount for refunded or partially_refunded transactions
-  netAmount: number; // Effective net earnings from this transaction
+  orderValue: number; // Product Subtotal - Applicable Product Discounts
+  refundedAmount: number;
+  netAmount: number; // Effective merchant earnings after applicable refunds
   settlementId?: string;
-  settlementStatus?: SettlementStatus | 'unsettled';
+  settlementStatus?: SettlementStatus;
 }
 
-export interface SettlementActivityItem {
-  id: string;
-  status: SettlementStatus;
-  title: string;
-  description?: string;
-  timestamp: string;
-  formattedTime: string;
+export interface SettlementIncludedOrder {
+  transactionId: string;
+  orderId: string;
+  customerName: string;
+  itemSummary: string;
+  orderDate: string;
+  createdAt: string;
+  deliveryConfirmedAt?: string;
+  orderAmount: number;
 }
 
+/**
+ * Represents an automatic merchant settlement combining eligible funds from multiple delivered orders.
+ */
 export interface SettlementRecord {
   id: string;
   settlementDate: string; // Human-readable date
   createdAt: string; // ISO 8601 timestamp
-  periodStartIso: string;
-  periodEndIso: string;
-  settlementPeriodLabel: string;
-  grossAmount: number;
-  totalDiscounts: number;
-  merchantFees: number;
-  totalDeductions: number; // totalDiscounts + merchantFees
-  netSettlementAmount: number;
+  processingDate?: string;
+  paidDate?: string;
+  settlementAmount: number;
   status: SettlementStatus;
   transactionIds: string[];
-  payoutReference?: string;
-  payoutMethodLabel?: string;
+  orders: SettlementIncludedOrder[];
+  bankName?: string;
+  maskedAccountNumber?: string;
+  accountName?: string;
+  transactionReference?: string;
   failureReason?: string;
-  activityLog: SettlementActivityItem[];
 }
 
-export interface FinancialOverviewMetrics {
-  grossSales: number;
-  productDiscounts: number;
-  promotionDiscounts: number;
-  totalDiscounts: number;
-  feesAndCommissions: number;
-  isFeeConfigAvailable: boolean;
+export interface OverviewSummaryMetrics {
+  totalSales: number;
+  awaitingRelease: number;
+  awaitingSettlement: number;
+  released: number;
+  totalOrders: number;
+  inEscrowOrderCount: number;
+  awaitingSettlementOrderCount: number;
+  releasedOrderCount: number;
   refundedTotal: number;
-  netEarnings: number;
-  pendingSettlement: number;
-  totalSettled: number;
-  qualifyingOrderCount: number;
-  averageOrderValue: number;
+}
+
+export interface SettlementSummaryMetrics {
+  awaitingRelease: number;
+  awaitingReleaseCount: number;
+  processing: number;
+  processingSettlementCount: number;
+  processingOrderCount: number;
+  readyForSettlement: number;
+  readyForSettlementCount: number;
+  successfullyPaid: number;
+  paidSettlementCount: number;
+  paidOrderCount: number;
 }
 
 export interface SalesChartBucket {
   key: string;
   label: string;
   fullLabel: string;
-  grossSales: number;
-  discounts: number;
-  fees: number;
-  netSales: number;
+  salesAmount: number;
   orderCount: number;
 }
 
@@ -149,40 +152,21 @@ export interface ProductSalesPerformanceItem {
   image?: string;
   ordersCount: number;
   quantitySold: number;
-  grossSalesValue: number;
-  productDiscountsApplied: number;
-  promotionDiscountsAllocated: number;
-  totalDiscounts: number;
-  netSalesValue: number;
-}
-
-export interface PeriodComparisonInsight {
-  hasSufficientHistoricalData: boolean;
-  currentPeriodNetSales: number;
-  previousPeriodNetSales: number;
-  currentPeriodOrders: number;
-  previousPeriodOrders: number;
-  percentageChange: number | null;
-  previousPeriodLabel: string;
-  reasonIfUnavailable?: string;
+  salesValue: number;
 }
 
 export type TransactionSortOption =
   | 'date_desc'
   | 'date_asc'
-  | 'net_desc'
-  | 'net_asc'
-  | 'gross_desc'
-  | 'gross_asc';
+  | 'amount_desc'
+  | 'amount_asc';
 
 export interface TransactionFiltersState {
   search: string;
-  status: 'all' | TransactionStatus;
+  paymentStatus: 'all' | PaymentStatus;
+  fundsStatus: 'all' | FundsStatus;
   periodPreset: 'all' | ReportingPeriodPreset;
   customFrom: string;
   customTo: string;
-  minAmount: string;
-  maxAmount: string;
   sortBy: TransactionSortOption;
 }
-

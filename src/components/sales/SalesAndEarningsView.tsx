@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type {
-  MerchantFeeConfig,
-  MerchantSettlementSchedule,
-  ReportCategory,
+  FundsStatus,
+  PaymentStatus,
   ReportingPeriodPreset,
   SalesSubTab,
   SalesTransaction,
@@ -10,17 +9,14 @@ import type {
   SettlementStatus,
   TransactionFiltersState,
   TransactionSortOption,
-  TransactionStatus,
 } from '../../types/sales';
 import {
   REPORTING_PERIOD_LABELS,
   SalesStorage,
-  TRANSACTION_STATUS_LABELS,
-  buildCsvContent,
   buildSalesChartBuckets,
-  calculateFinancialMetrics,
-  calculatePeriodComparison,
+  calculateOverviewMetrics,
   calculateProductPerformance,
+  calculateSettlementSummaryMetrics,
   filterSettlementsByWindow,
   filterTransactionsByWindow,
   getReferenceDate,
@@ -28,36 +24,32 @@ import {
 } from '../../services/salesStorage';
 import { formatNaira } from '../../services/productStorage';
 import { Button } from '../common/Button';
-import { useToast } from '../common/Toast';
 import {
+  FundsStatusBadge,
+  PaymentStatusBadge,
   SettlementStatusBadge,
-  TransactionStatusBadge,
 } from './SalesStatusBadges';
 import { SalesPerformanceChart } from './SalesPerformanceChart';
 import { TransactionDetailsModal } from './TransactionDetailsModal';
 import { SettlementDetailsModal } from './SettlementDetailsModal';
 import {
-  Wallet,
   Calendar,
-  TrendingUp,
-  TrendingDown,
   Search,
   X,
   RotateCcw,
-  Download,
-  FileSpreadsheet,
-  Info,
   AlertCircle,
   RefreshCw,
   Package,
   Landmark,
   BarChart3,
   Receipt,
-  Clock,
   ChevronLeft,
   ChevronRight,
   ShoppingBag,
   Award,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 
 const SUB_TABS: Array<{
@@ -68,55 +60,18 @@ const SUB_TABS: Array<{
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'transactions', label: 'Transactions', icon: Receipt },
   { id: 'settlements', label: 'Settlements', icon: Landmark },
-  { id: 'reports', label: 'Reports', icon: FileSpreadsheet },
 ];
 
-const PERIOD_PRESETS: ReportingPeriodPreset[] = [
-  'today',
-  'yesterday',
+const OVERVIEW_PERIOD_PRESETS: ReportingPeriodPreset[] = [
   'last_7_days',
   'last_30_days',
   'this_month',
   'last_month',
-  'this_year',
   'custom',
 ];
 
-const REPORT_CATEGORIES: Array<{
-  id: ReportCategory;
-  title: string;
-  subtitle: string;
-}> = [
-  {
-    id: 'sales_report',
-    title: 'Sales Report',
-    subtitle:
-      'Gross sales, discounts, net sales, order volume, and period breakdown.',
-  },
-  {
-    id: 'transaction_report',
-    title: 'Transaction Report',
-    subtitle:
-      'Status breakdown across successful, pending, failed, and refunded transactions.',
-  },
-  {
-    id: 'earnings_report',
-    title: 'Earnings Report',
-    subtitle:
-      'Gross sales, applicable fees & commissions, net earnings, and settlement reconciliation.',
-  },
-  {
-    id: 'product_performance_report',
-    title: 'Product Performance Report',
-    subtitle:
-      'Best-selling products by quantity and sales value with applied discounts.',
-  },
-];
-
 export const SalesAndEarningsView: React.FC = () => {
-  const toast = useToast();
-
-  // Sub-navigation inside Sales & Earnings (Overview | Transactions | Settlements | Reports)
+  // Sub-navigation inside Sales & Earnings (Overview | Transactions | Settlements)
   const [activeSubTab, setActiveSubTab] = useState<SalesSubTab>('overview');
 
   // Underlying financial data state
@@ -126,18 +81,11 @@ export const SalesAndEarningsView: React.FC = () => {
   const [settlements, setSettlements] = useState<SettlementRecord[]>(() =>
     SalesStorage.getSettlements()
   );
-  const [feeConfig, setFeeConfig] = useState<MerchantFeeConfig>(() =>
-    SalesStorage.getFeeConfig()
-  );
-  const [settlementSchedule, setSettlementSchedule] =
-    useState<MerchantSettlementSchedule>(() =>
-      SalesStorage.getSettlementSchedule()
-    );
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Overview & Settlements Reporting Period State (default Last 7 Days to cover active store history)
+  // Overview Reporting Period State (default Last 7 Days)
   const [overviewPreset, setOverviewPreset] =
     useState<ReportingPeriodPreset>('last_7_days');
   const [overviewCustomFrom, setOverviewCustomFrom] = useState('2026-11-01');
@@ -146,12 +94,11 @@ export const SalesAndEarningsView: React.FC = () => {
   // Transactions Tab Filter & Pagination State
   const [txFilters, setTxFilters] = useState<TransactionFiltersState>({
     search: '',
-    status: 'all',
+    paymentStatus: 'all',
+    fundsStatus: 'all',
     periodPreset: 'all',
     customFrom: '2026-11-01',
     customTo: '2026-11-10',
-    minAmount: '',
-    maxAmount: '',
     sortBy: 'date_desc',
   });
   const [txPage, setTxPage] = useState(1);
@@ -168,19 +115,6 @@ export const SalesAndEarningsView: React.FC = () => {
     'all' | SettlementStatus
   >('all');
 
-  // Reports Tab State
-  const [reportCategory, setReportCategory] =
-    useState<ReportCategory>('sales_report');
-  const [reportPreset, setReportPreset] =
-    useState<ReportingPeriodPreset>('last_7_days');
-  const [reportCustomFrom, setReportCustomFrom] = useState('2026-11-01');
-  const [reportCustomTo, setReportCustomTo] = useState('2026-11-10');
-  const [reportStatusFilter, setReportStatusFilter] = useState<
-    'all' | TransactionStatus
-  >('all');
-  const [reportProductFilter, setReportProductFilter] = useState<string>('all');
-  const [isExportingCsv, setIsExportingCsv] = useState(false);
-
   // Detail Modals State
   const [selectedTransactionId, setSelectedTransactionId] = useState<
     string | null
@@ -195,8 +129,6 @@ export const SalesAndEarningsView: React.FC = () => {
       setLoadError(null);
       setTransactions(SalesStorage.getTransactions());
       setSettlements(SalesStorage.getSettlements());
-      setFeeConfig(SalesStorage.getFeeConfig());
-      setSettlementSchedule(SalesStorage.getSettlementSchedule());
     } catch (err: any) {
       setLoadError(
         err?.message || 'Unable to load store financial records. Please retry.'
@@ -210,8 +142,6 @@ export const SalesAndEarningsView: React.FC = () => {
     const syncData = () => {
       setTransactions(SalesStorage.getTransactions());
       setSettlements(SalesStorage.getSettlements());
-      setFeeConfig(SalesStorage.getFeeConfig());
-      setSettlementSchedule(SalesStorage.getSettlementSchedule());
     };
     window.addEventListener('errandify:orders-updated', syncData);
     window.addEventListener('errandify:sales-updated', syncData);
@@ -247,19 +177,9 @@ export const SalesAndEarningsView: React.FC = () => {
     [transactions, overviewWindow]
   );
 
-  const overviewSettlements = useMemo(
-    () => filterSettlementsByWindow(settlements, overviewWindow),
-    [settlements, overviewWindow]
-  );
-
   const overviewMetrics = useMemo(
-    () =>
-      calculateFinancialMetrics(
-        overviewTransactions,
-        overviewSettlements,
-        feeConfig
-      ),
-    [overviewTransactions, overviewSettlements, feeConfig]
+    () => calculateOverviewMetrics(overviewTransactions),
+    [overviewTransactions]
   );
 
   const overviewChartBuckets = useMemo(
@@ -267,14 +187,9 @@ export const SalesAndEarningsView: React.FC = () => {
     [overviewTransactions, overviewWindow]
   );
 
-  const overviewBestProducts = useMemo(
+  const overviewTopProducts = useMemo(
     () => calculateProductPerformance(overviewTransactions),
     [overviewTransactions]
-  );
-
-  const overviewComparison = useMemo(
-    () => calculatePeriodComparison(transactions, overviewWindow),
-    [transactions, overviewWindow]
   );
 
   // ============================================================================
@@ -282,21 +197,19 @@ export const SalesAndEarningsView: React.FC = () => {
   // ============================================================================
   const hasActiveTxFilters =
     txFilters.search.trim() !== '' ||
-    txFilters.status !== 'all' ||
+    txFilters.paymentStatus !== 'all' ||
+    txFilters.fundsStatus !== 'all' ||
     txFilters.periodPreset !== 'all' ||
-    txFilters.minAmount.trim() !== '' ||
-    txFilters.maxAmount.trim() !== '' ||
     txFilters.sortBy !== 'date_desc';
 
   const handleResetTxFilters = () => {
     setTxFilters({
       search: '',
-      status: 'all',
+      paymentStatus: 'all',
+      fundsStatus: 'all',
       periodPreset: 'all',
       customFrom: '2026-11-01',
       customTo: '2026-11-10',
-      minAmount: '',
-      maxAmount: '',
       sortBy: 'date_desc',
     });
     setTxPage(1);
@@ -316,9 +229,14 @@ export const SalesAndEarningsView: React.FC = () => {
       list = filterTransactionsByWindow(list, win);
     }
 
-    // Status filter
-    if (txFilters.status !== 'all') {
-      list = list.filter((tx) => tx.status === txFilters.status);
+    // Payment Status filter
+    if (txFilters.paymentStatus !== 'all') {
+      list = list.filter((tx) => tx.paymentStatus === txFilters.paymentStatus);
+    }
+
+    // Funds Status filter
+    if (txFilters.fundsStatus !== 'all') {
+      list = list.filter((tx) => tx.fundsStatus === txFilters.fundsStatus);
     }
 
     // Search by customer name or product name (including options)
@@ -337,27 +255,12 @@ export const SalesAndEarningsView: React.FC = () => {
       });
     }
 
-    // Amount range filter (evaluates against Net Amount)
-    const minVal =
-      txFilters.minAmount.trim() !== '' ? Number(txFilters.minAmount) : null;
-    const maxVal =
-      txFilters.maxAmount.trim() !== '' ? Number(txFilters.maxAmount) : null;
-
-    if (minVal !== null && !isNaN(minVal)) {
-      list = list.filter((tx) => tx.netAmount >= minVal);
-    }
-    if (maxVal !== null && !isNaN(maxVal)) {
-      list = list.filter((tx) => tx.netAmount <= maxVal);
-    }
-
     // Sorting
     list.sort((a, b) => {
-      if (txFilters.sortBy === 'net_desc') return b.netAmount - a.netAmount;
-      if (txFilters.sortBy === 'net_asc') return a.netAmount - b.netAmount;
-      if (txFilters.sortBy === 'gross_desc')
-        return b.grossAmount - a.grossAmount;
-      if (txFilters.sortBy === 'gross_asc')
-        return a.grossAmount - b.grossAmount;
+      if (txFilters.sortBy === 'amount_desc')
+        return b.orderValue - a.orderValue;
+      if (txFilters.sortBy === 'amount_asc')
+        return a.orderValue - b.orderValue;
       const timeA = new Date(a.createdAt).getTime();
       const timeB = new Date(b.createdAt).getTime();
       if (txFilters.sortBy === 'date_asc') return timeA - timeB;
@@ -394,17 +297,25 @@ export const SalesAndEarningsView: React.FC = () => {
     referenceDate,
   ]);
 
+  const settlementPeriodRecords = useMemo(() => {
+    if (settlementPreset === 'all') return settlements;
+    const win = resolveReportingPeriodWindow(
+      settlementPreset,
+      settlementCustomFrom,
+      settlementCustomTo,
+      referenceDate
+    );
+    return filterSettlementsByWindow(settlements, win);
+  }, [
+    settlements,
+    settlementPreset,
+    settlementCustomFrom,
+    settlementCustomTo,
+    referenceDate,
+  ]);
+
   const filteredSettlements = useMemo(() => {
-    let list = [...settlements];
-    if (settlementPreset !== 'all') {
-      const win = resolveReportingPeriodWindow(
-        settlementPreset,
-        settlementCustomFrom,
-        settlementCustomTo,
-        referenceDate
-      );
-      list = filterSettlementsByWindow(list, win);
-    }
+    let list = [...settlementPeriodRecords];
     if (settlementStatusFilter !== 'all') {
       list = list.filter((s) => s.status === settlementStatusFilter);
     }
@@ -412,338 +323,27 @@ export const SalesAndEarningsView: React.FC = () => {
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [
-    settlements,
-    settlementPreset,
-    settlementCustomFrom,
-    settlementCustomTo,
-    settlementStatusFilter,
-    referenceDate,
-  ]);
+  }, [settlementPeriodRecords, settlementStatusFilter]);
 
   const settlementSummaryMetrics = useMemo(
     () =>
-      calculateFinancialMetrics(
+      calculateSettlementSummaryMetrics(
         settlementPeriodTransactions,
-        settlementPreset === 'all'
-          ? settlements
-          : filterSettlementsByWindow(
-              settlements,
-              resolveReportingPeriodWindow(
-                settlementPreset,
-                settlementCustomFrom,
-                settlementCustomTo,
-                referenceDate
-              )
-            ),
-        feeConfig
+        settlementPeriodRecords
       ),
-    [
-      settlementPeriodTransactions,
-      settlements,
-      settlementPreset,
-      settlementCustomFrom,
-      settlementCustomTo,
-      referenceDate,
-      feeConfig,
-    ]
+    [settlementPeriodTransactions, settlementPeriodRecords]
   );
-
-  const unsettledQualifyingTransactions = useMemo(
-    () =>
-      settlementPeriodTransactions.filter(
-        (tx) =>
-          (tx.status === 'successful' || tx.status === 'partially_refunded') &&
-          tx.settlementStatus !== 'paid'
-      ),
-    [settlementPeriodTransactions]
-  );
-
-  // ============================================================================
-  // 4. REPORTS TAB COMPUTATIONS & CSV EXPORT
-  // ============================================================================
-  const reportWindow = useMemo(
-    () =>
-      resolveReportingPeriodWindow(
-        reportPreset,
-        reportCustomFrom,
-        reportCustomTo,
-        referenceDate
-      ),
-    [reportPreset, reportCustomFrom, reportCustomTo, referenceDate]
-  );
-
-  // Unique product names for report product filter dropdown
-  const availableReportProducts = useMemo(() => {
-    const names = new Set<string>();
-    transactions.forEach((tx) => {
-      tx.items.forEach((item) => names.add(item.name));
-    });
-    return Array.from(names).sort();
-  }, [transactions]);
-
-  const reportFilteredTransactions = useMemo(() => {
-    let list = filterTransactionsByWindow(transactions, reportWindow);
-
-    if (
-      reportCategory !== 'product_performance_report' &&
-      reportStatusFilter !== 'all'
-    ) {
-      list = list.filter((tx) => tx.status === reportStatusFilter);
-    }
-
-    if (reportProductFilter !== 'all') {
-      list = list.filter((tx) =>
-        tx.items.some((item) => item.name === reportProductFilter)
-      );
-    }
-
-    return list;
-  }, [
-    transactions,
-    reportWindow,
-    reportCategory,
-    reportStatusFilter,
-    reportProductFilter,
-  ]);
-
-  const reportFilteredSettlements = useMemo(
-    () => filterSettlementsByWindow(settlements, reportWindow),
-    [settlements, reportWindow]
-  );
-
-  const reportMetrics = useMemo(
-    () =>
-      calculateFinancialMetrics(
-        reportFilteredTransactions,
-        reportFilteredSettlements,
-        feeConfig
-      ),
-    [reportFilteredTransactions, reportFilteredSettlements, feeConfig]
-  );
-
-  const reportChartBuckets = useMemo(
-    () => buildSalesChartBuckets(reportFilteredTransactions, reportWindow),
-    [reportFilteredTransactions, reportWindow]
-  );
-
-  const reportProductPerformance = useMemo(() => {
-    const allProdPerf = calculateProductPerformance(reportFilteredTransactions);
-    if (reportProductFilter === 'all') return allProdPerf;
-    return allProdPerf.filter((p) => p.productName === reportProductFilter);
-  }, [reportFilteredTransactions, reportProductFilter]);
-
-  const hasActiveReportFilters =
-    reportPreset !== 'last_7_days' ||
-    reportStatusFilter !== 'all' ||
-    reportProductFilter !== 'all';
-
-  const handleResetReportFilters = () => {
-    setReportPreset('last_7_days');
-    setReportCustomFrom('2026-11-01');
-    setReportCustomTo('2026-11-10');
-    setReportStatusFilter('all');
-    setReportProductFilter('all');
-  };
-
-  // Functional CSV Export
-  const handleExportReportCsv = () => {
-    try {
-      setIsExportingCsv(true);
-
-      let headers: string[] = [];
-      let rows: Array<Array<string | number>> = [];
-      let filePrefix = 'errandify-report';
-
-      if (reportCategory === 'sales_report') {
-        filePrefix = 'errandify-sales-report';
-        const nonZeroBuckets = reportChartBuckets.filter(
-          (b) => b.orderCount > 0 || b.grossSales > 0
-        );
-        if (nonZeroBuckets.length === 0) {
-          toast.info(
-            'No report data to export',
-            'There are no sales records matching the selected reporting period and filters.'
-          );
-          setIsExportingCsv(false);
-          return;
-        }
-        headers = [
-          'Date / Interval',
-          'Qualifying Orders',
-          'Gross Sales (NGN)',
-          'Discounts Applied (NGN)',
-          'Fees & Commissions (NGN)',
-          'Net Sales (NGN)',
-        ];
-        rows = reportChartBuckets.map((b) => [
-          b.fullLabel,
-          b.orderCount,
-          formatNaira(b.grossSales),
-          formatNaira(b.discounts),
-          feeConfig.isConfigured || b.fees > 0
-            ? formatNaira(b.fees)
-            : '₦0 (Not Configured)',
-          formatNaira(b.netSales),
-        ]);
-        // Append summary row
-        rows.push([
-          `TOTAL (${reportWindow.formattedRange})`,
-          reportMetrics.qualifyingOrderCount,
-          formatNaira(reportMetrics.grossSales),
-          formatNaira(reportMetrics.totalDiscounts),
-          feeConfig.isConfigured || reportMetrics.feesAndCommissions > 0
-            ? formatNaira(reportMetrics.feesAndCommissions)
-            : '₦0 (Not Configured)',
-          formatNaira(reportMetrics.netEarnings),
-        ]);
-      } else if (reportCategory === 'transaction_report') {
-        filePrefix = 'errandify-transaction-report';
-        if (reportFilteredTransactions.length === 0) {
-          toast.info(
-            'No transactions to export',
-            'There are no transaction records matching the selected filters.'
-          );
-          setIsExportingCsv(false);
-          return;
-        }
-        headers = [
-          'Date & Time',
-          'Customer Name',
-          'Items / Order Summary',
-          'Gross Amount (NGN)',
-          'Product Discounts (NGN)',
-          'Promotion Discounts (NGN)',
-          'Fees & Commissions (NGN)',
-          'Net Amount (NGN)',
-          'Transaction Status',
-        ];
-        rows = reportFilteredTransactions.map((tx) => [
-          tx.dateTime,
-          tx.customerName,
-          tx.itemSummary,
-          formatNaira(tx.grossAmount),
-          formatNaira(tx.productDiscountAmount),
-          formatNaira(tx.promotionDiscountAmount),
-          feeConfig.isConfigured || tx.merchantFeeAmount > 0
-            ? formatNaira(tx.merchantFeeAmount)
-            : '₦0 (Not Configured)',
-          formatNaira(tx.netAmount),
-          TRANSACTION_STATUS_LABELS[tx.status],
-        ]);
-      } else if (reportCategory === 'earnings_report') {
-        filePrefix = 'errandify-earnings-report';
-        const qualifying = reportFilteredTransactions.filter(
-          (tx) =>
-            tx.status === 'successful' || tx.status === 'partially_refunded'
-        );
-        if (qualifying.length === 0) {
-          toast.info(
-            'No earnings data to export',
-            'There are no qualifying earnings records in the selected reporting period.'
-          );
-          setIsExportingCsv(false);
-          return;
-        }
-        headers = [
-          'Date & Time',
-          'Customer Name',
-          'Gross Sales (NGN)',
-          'Total Discounts (NGN)',
-          'Applicable Commissions & Fees (NGN)',
-          'Net Earnings (NGN)',
-          'Settlement Status',
-        ];
-        rows = qualifying.map((tx) => [
-          tx.dateTime,
-          tx.customerName,
-          formatNaira(tx.grossAmount),
-          formatNaira(tx.totalDiscounts),
-          feeConfig.isConfigured || tx.merchantFeeAmount > 0
-            ? formatNaira(tx.merchantFeeAmount)
-            : '₦0 (Not Configured)',
-          formatNaira(tx.netAmount),
-          tx.settlementStatus === 'paid' ? 'Settled' : 'Pending Settlement',
-        ]);
-        rows.push([
-          `PERIOD TOTAL (${reportWindow.formattedRange})`,
-          `${qualifying.length} Orders`,
-          formatNaira(reportMetrics.grossSales),
-          formatNaira(reportMetrics.totalDiscounts),
-          feeConfig.isConfigured || reportMetrics.feesAndCommissions > 0
-            ? formatNaira(reportMetrics.feesAndCommissions)
-            : '₦0 (Not Configured)',
-          formatNaira(reportMetrics.netEarnings),
-          `Pending: ${formatNaira(
-            reportMetrics.pendingSettlement
-          )} | Settled: ${formatNaira(reportMetrics.totalSettled)}`,
-        ]);
-      } else if (reportCategory === 'product_performance_report') {
-        filePrefix = 'errandify-product-performance-report';
-        if (reportProductPerformance.length === 0) {
-          toast.info(
-            'No product performance data to export',
-            'There are no product sales matching the selected reporting period and filters.'
-          );
-          setIsExportingCsv(false);
-          return;
-        }
-        headers = [
-          'Product Name',
-          'Unit of Sale',
-          'Orders Count',
-          'Quantity Sold',
-          'Gross Sales Value (NGN)',
-          'Product Discounts Applied (NGN)',
-          'Promotion Discounts Allocated (NGN)',
-          'Net Sales Value (NGN)',
-        ];
-        rows = reportProductPerformance.map((p) => [
-          p.productName,
-          p.unit || 'Unit',
-          p.ordersCount,
-          p.quantitySold,
-          formatNaira(p.grossSalesValue),
-          formatNaira(p.productDiscountsApplied),
-          formatNaira(p.promotionDiscountsAllocated),
-          formatNaira(p.netSalesValue),
-        ]);
-      }
-
-      const csvString = buildCsvContent(headers, rows);
-      const blob = new Blob(['\uFEFF' + csvString], {
-        type: 'text/csv;charset=utf-8;',
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const safePeriod = reportWindow.label
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-');
-      link.href = url;
-      link.setAttribute('download', `${filePrefix}-${safePeriod}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(
-        'Report exported as CSV',
-        `Downloaded ${rows.length} rows for ${
-          REPORT_CATEGORIES.find((c) => c.id === reportCategory)?.title
-        } (${reportWindow.formattedRange}).`
-      );
-    } catch (err: any) {
-      toast.error(
-        'Export failed',
-        err?.message || 'Unable to generate CSV export. Please try again.'
-      );
-    } finally {
-      setIsExportingCsv(false);
-    }
-  };
 
   const selectedTransaction =
     transactions.find((t) => t.id === selectedTransactionId) || null;
+  const selectedTransactionSettlement = useMemo(() => {
+    if (!selectedTransaction?.settlementId) return null;
+    return (
+      settlements.find((s) => s.id === selectedTransaction.settlementId) ||
+      null
+    );
+  }, [selectedTransaction, settlements]);
+
   const selectedSettlement =
     settlements.find((s) => s.id === selectedSettlementId) || null;
 
@@ -756,12 +356,12 @@ export const SalesAndEarningsView: React.FC = () => {
             Sales & Earnings
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Monitor store sales performance, transaction breakdowns, net
-            earnings, settlements, and financial reports.
+            Track your product sales, funds held in escrow, and automatic bank
+            settlements.
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
               className="bg-white border border-slate-200/80 rounded-2xl p-5 h-32 animate-pulse"
@@ -814,13 +414,13 @@ export const SalesAndEarningsView: React.FC = () => {
             Sales & Earnings
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Monitor store sales performance, transaction breakdowns, applicable
-            deductions, net earnings, settlements, and reports.
+            Track your product sales, funds held in escrow, and automatic bank
+            settlements.
           </p>
         </div>
       </div>
 
-      {/* Page-Level Navigation Tabs: Overview | Transactions | Settlements | Reports */}
+      {/* Page-Level Navigation Tabs: Overview | Transactions | Settlements */}
       <div className="border-b border-slate-200 overflow-x-auto">
         <div className="flex items-center gap-1 min-w-max">
           {SUB_TABS.map((tab) => {
@@ -854,27 +454,27 @@ export const SalesAndEarningsView: React.FC = () => {
           ========================================================================== */}
       {activeSubTab === 'overview' && (
         <div className="space-y-6">
-          {/* Reporting Period Selector Bar */}
+          {/* Date Range Filter Bar */}
           <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-slate-600">
+              <div className="flex items-center gap-2.5 text-xs text-slate-600">
                 <div className="w-8 h-8 rounded-xl bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center shrink-0">
                   <Calendar className="w-4 h-4" />
                 </div>
                 <div>
                   <span className="font-bold text-slate-900 block">
-                    Reporting Period: {overviewWindow.label} (
+                    Date Range: {overviewWindow.label} (
                     {overviewWindow.formattedRange})
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    Grouped in merchant timezone ({overviewWindow.timezoneLabel})
+                    Showing merchant product sales and settlement status
                   </span>
                 </div>
               </div>
 
-              {/* Preset Pills */}
+              {/* Selectable Period Pills */}
               <div className="flex items-center gap-1.5 flex-wrap">
-                {PERIOD_PRESETS.map((preset) => {
+                {OVERVIEW_PERIOD_PRESETS.map((preset) => {
                   const active = overviewPreset === preset;
                   return (
                     <button
@@ -898,10 +498,10 @@ export const SalesAndEarningsView: React.FC = () => {
             {overviewPreset === 'custom' && (
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs">
                 <span className="font-semibold text-slate-700">
-                  Select Custom Date Range:
+                  Custom Date Range:
                 </span>
                 <div className="flex items-center gap-2">
-                  <label className="text-slate-500">Start Date</label>
+                  <label className="text-slate-500">From</label>
                   <input
                     type="date"
                     value={overviewCustomFrom}
@@ -910,7 +510,7 @@ export const SalesAndEarningsView: React.FC = () => {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-slate-500">End Date</label>
+                  <label className="text-slate-500">To</label>
                   <input
                     type="date"
                     value={overviewCustomTo}
@@ -922,338 +522,186 @@ export const SalesAndEarningsView: React.FC = () => {
             )}
           </div>
 
-          {/* 6 Financial Summary Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* 1. Gross Sales */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Gross Sales
-                </span>
-                <span className="text-[11px] font-medium text-slate-400">
-                  {overviewMetrics.qualifyingOrderCount}{' '}
-                  {overviewMetrics.qualifyingOrderCount === 1
-                    ? 'order'
-                    : 'orders'}
-                </span>
-              </div>
-              <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {formatNaira(overviewMetrics.grossSales)}
-              </p>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Total value of products sold before discounts and merchant
-                deductions.
-              </p>
-            </div>
-
-            {/* 2. Total Discounts */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Total Discounts
-                </span>
-                {overviewMetrics.totalDiscounts > 0 && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Applied
-                  </span>
-                )}
-              </div>
-              <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {overviewMetrics.totalDiscounts > 0
-                  ? `-${formatNaira(overviewMetrics.totalDiscounts)}`
-                  : formatNaira(0)}
-              </p>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Product discounts (
-                {formatNaira(overviewMetrics.productDiscounts)}) + promotion
-                discounts ({formatNaira(overviewMetrics.promotionDiscounts)}).
-              </p>
-            </div>
-
-            {/* 3. Fees & Commissions */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-500">
-                  Fees & Commissions
-                </span>
-                {!overviewMetrics.isFeeConfigAvailable && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                    <Info className="w-2.5 h-2.5" />
-                    Not Configured
-                  </span>
-                )}
-              </div>
-              <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {overviewMetrics.isFeeConfigAvailable
-                  ? overviewMetrics.feesAndCommissions > 0
-                    ? `-${formatNaira(overviewMetrics.feesAndCommissions)}`
-                    : formatNaira(0)
-                  : formatNaira(0)}
-              </p>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                {overviewMetrics.isFeeConfigAvailable
-                  ? 'Applicable merchant-facing fees and commissions deducted from sales.'
-                  : 'No merchant commission or fee rule is configured on this store profile (₦0 deducted).'}
-              </p>
-            </div>
-
-            {/* 4. Net Earnings */}
+          {/* 4 Summary Cards: Total Sales, Awaiting Release, Released, Total Orders */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. Total Sales */}
             <div className="bg-[#F8F6FE] border border-[#DDD0FA] rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[#5E17EB]">
-                  Net Earnings
+                  Total Sales
                 </span>
-                <Wallet className="w-4 h-4 text-[#5E17EB]" />
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white text-[#5E17EB] border border-[#DDD0FA]">
+                  Net of Refunds
+                </span>
               </div>
               <p className="text-2xl sm:text-3xl font-extrabold text-[#5E17EB] tracking-tight tabular-nums">
-                {formatNaira(overviewMetrics.netEarnings)}
+                {formatNaira(overviewMetrics.totalSales)}
               </p>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Store earnings after applicable product/promotion discounts and
-                merchant deductions.
+                Total value of successfully paid product orders, adjusted for
+                applicable refunds.
               </p>
             </div>
 
-            {/* 5. Pending Settlement */}
+            {/* 2. Awaiting Release */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Pending Settlement
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600">
+                  Awaiting Release
                 </span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                  Awaiting Payout
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#FEF9C3] text-[#A16207] border border-[#FEF08A]">
+                  In Escrow
                 </span>
               </div>
               <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {formatNaira(overviewMetrics.pendingSettlement)}
+                {formatNaira(overviewMetrics.awaitingRelease)}
               </p>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Earned merchant funds from confirmed sales awaiting settlement.
+                Earnings from paid orders in escrow awaiting customer delivery
+                confirmation.
+                {overviewMetrics.awaitingSettlement > 0 && (
+                  <span className="block text-sky-700 font-medium mt-0.5">
+                    +{formatNaira(overviewMetrics.awaitingSettlement)} delivery
+                    confirmed (processing settlement)
+                  </span>
+                )}
               </p>
             </div>
 
-            {/* 6. Total Settled */}
+            {/* 3. Released */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Total Settled
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600">
+                  Released
                 </span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]">
                   Paid Out
                 </span>
               </div>
               <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {formatNaira(overviewMetrics.totalSettled)}
+                {formatNaira(overviewMetrics.released)}
               </p>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Funds successfully settled to the merchant over the selected
-                period.
+                Merchant funds successfully paid out through completed
+                settlements.
+              </p>
+            </div>
+
+            {/* 4. Total Orders */}
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600">
+                  Total Orders
+                </span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  Paid Orders
+                </span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
+                {overviewMetrics.totalOrders}
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Number of successfully paid orders within the selected date
+                range.
               </p>
             </div>
           </div>
 
-          {/* Sales Performance Chart */}
+          {/* Sales Chart */}
           <SalesPerformanceChart
             buckets={overviewChartBuckets}
             periodWindow={overviewWindow}
             hasAnyStoreSales={transactions.length > 0}
           />
 
-          {/* Additional Sales Insights */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Left Column: Order Volume, AOV, and Verified Period Comparison */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
-              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                Performance Insights
-              </h3>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[11px] font-medium text-slate-500 block">
-                    Qualifying Orders
-                  </span>
-                  <span className="text-xl font-extrabold text-slate-900 mt-1 block tabular-nums">
-                    {overviewMetrics.qualifyingOrderCount}
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    Contributing to sales
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[11px] font-medium text-slate-500 block">
-                    Average Order Value
-                  </span>
-                  <span className="text-xl font-extrabold text-slate-900 mt-1 block tabular-nums">
-                    {formatNaira(overviewMetrics.averageOrderValue)}
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    Net sales per order
-                  </span>
-                </div>
-              </div>
-
-              {/* Sales Trend vs Previous Equivalent Period */}
-              <div className="p-3.5 rounded-xl border border-slate-200/80 bg-white space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-slate-800">
-                    Trend vs. Previous Period
-                  </span>
-                  {overviewComparison.hasSufficientHistoricalData &&
-                    overviewComparison.percentageChange !== null && (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold tabular-nums ${
-                          overviewComparison.percentageChange >= 0
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-red-50 text-red-700 border border-red-200'
-                        }`}
-                      >
-                        {overviewComparison.percentageChange >= 0 ? (
-                          <TrendingUp className="w-3.5 h-3.5" />
-                        ) : (
-                          <TrendingDown className="w-3.5 h-3.5" />
-                        )}
-                        {overviewComparison.percentageChange >= 0 ? '+' : ''}
-                        {overviewComparison.percentageChange}%
-                      </span>
-                    )}
-                </div>
-
-                {overviewComparison.hasSufficientHistoricalData ? (
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Net sales of{' '}
-                    <strong className="tabular-nums text-slate-900">
-                      {formatNaira(overviewComparison.currentPeriodNetSales)}
-                    </strong>{' '}
-                    ({overviewComparison.currentPeriodOrders} orders) compared
-                    with{' '}
-                    <strong className="tabular-nums text-slate-900">
-                      {formatNaira(overviewComparison.previousPeriodNetSales)}
-                    </strong>{' '}
-                    ({overviewComparison.previousPeriodOrders} orders) in{' '}
-                    <span className="font-medium">
-                      {overviewComparison.previousPeriodLabel}
-                    </span>
-                    .
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    {overviewComparison.reasonIfUnavailable}
-                  </p>
-                )}
+          {/* Top-Selling Products */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Award className="w-4 h-4 text-[#5E17EB]" />
+                  Top-Selling Products
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Products ranked by sales value during{' '}
+                  {overviewWindow.formattedRange}.
+                </p>
               </div>
             </div>
 
-            {/* Right 2 Columns: Best-Selling Products by Sales Value */}
-            <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-[#5E17EB]" />
-                    Best-Selling Products by Sales Value
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Ranked by actual net sales value during{' '}
-                    {overviewWindow.formattedRange}.
-                  </p>
-                </div>
+            {overviewTopProducts.length === 0 ? (
+              <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2 bg-slate-50/50">
+                <ShoppingBag className="w-6 h-6 text-slate-400 mx-auto" />
+                <p className="text-xs font-semibold text-slate-700">
+                  No product sales in this period
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Select a date range with paid orders to view top-selling
+                  products.
+                </p>
               </div>
-
-              {overviewBestProducts.length === 0 ? (
-                <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2 bg-slate-50/50">
-                  <ShoppingBag className="w-6 h-6 text-slate-400 mx-auto" />
-                  <p className="text-xs font-semibold text-slate-700">
-                    No product sales in this period
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Select a reporting period with recorded transactions to view
-                    best-selling products.
-                  </p>
-                </div>
-              ) : (
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
-                        <tr>
-                          <th className="py-2.5 px-3">Product</th>
-                          <th className="py-2.5 px-2.5 text-center whitespace-nowrap">
-                            Qty Sold
-                          </th>
-                          <th className="py-2.5 px-3 text-right whitespace-nowrap">
-                            Gross Value
-                          </th>
-                          <th className="py-2.5 px-3 text-right whitespace-nowrap">
-                            Discounts
-                          </th>
-                          <th className="py-2.5 px-3 text-right whitespace-nowrap">
-                            Net Sales Value
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {overviewBestProducts.slice(0, 5).map((prod, idx) => (
-                          <tr
-                            key={prod.productKey}
-                            className="hover:bg-slate-50/70"
-                          >
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2.5">
-                                <span className="w-5 h-5 rounded-full bg-[#F3EFFE] text-[#5E17EB] font-bold text-[11px] flex items-center justify-center shrink-0">
-                                  {idx + 1}
-                                </span>
-                                <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center">
-                                  {prod.image ? (
-                                    <img
-                                      src={prod.image}
-                                      alt={prod.productName}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <Package className="w-4 h-4 text-slate-400" />
-                                  )}
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="font-semibold text-slate-900 truncate">
-                                    {prod.productName}
-                                  </p>
-                                  <p className="text-[11px] text-slate-500">
-                                    {prod.ordersCount}{' '}
-                                    {prod.ordersCount === 1
-                                      ? 'order'
-                                      : 'orders'}
-                                  </p>
-                                </div>
+            ) : (
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
+                      <tr>
+                        <th className="py-3 px-4">Product Name</th>
+                        <th className="py-3 px-3 text-center whitespace-nowrap">
+                          Units Sold
+                        </th>
+                        <th className="py-3 px-4 text-right whitespace-nowrap">
+                          Sales Value
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {overviewTopProducts.slice(0, 6).map((prod, idx) => (
+                        <tr
+                          key={prod.productKey}
+                          className="hover:bg-slate-50/70"
+                        >
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <span className="w-5 h-5 rounded-full bg-[#F3EFFE] text-[#5E17EB] font-bold text-[11px] flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <div className="w-9 h-9 rounded-lg bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center">
+                                {prod.image ? (
+                                  <img
+                                    src={prod.image}
+                                    alt={prod.productName}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Package className="w-4 h-4 text-slate-400" />
+                                )}
                               </div>
-                            </td>
-                            <td className="py-2.5 px-2.5 text-center font-bold text-slate-800 tabular-nums whitespace-nowrap">
-                              {prod.quantitySold}
-                            </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                              {formatNaira(prod.grossSalesValue)}
-                            </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
-                              {prod.totalDiscounts > 0 ? (
-                                <span className="text-emerald-700 font-medium">
-                                  -{formatNaira(prod.totalDiscounts)}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">
-                                  {formatNaira(0)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">
-                              {formatNaira(prod.netSalesValue)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-900 truncate">
+                                  {prod.productName}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {prod.ordersCount}{' '}
+                                  {prod.ordersCount === 1 ? 'order' : 'orders'}
+                                  {prod.unit ? ` · ${prod.unit}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-800 tabular-nums whitespace-nowrap">
+                            {prod.quantitySold}
+                          </td>
+                          <td className="py-3 px-4 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">
+                            {formatNaira(prod.salesValue)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1270,7 +718,7 @@ export const SalesAndEarningsView: React.FC = () => {
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search transactions by customer name or product name..."
+                placeholder="Search transactions by customer name or product..."
                 value={txFilters.search}
                 onChange={(e) => {
                   setTxFilters((prev) => ({
@@ -1296,31 +744,49 @@ export const SalesAndEarningsView: React.FC = () => {
               )}
             </div>
 
-            {/* Filter Dropdowns & Amount Range */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-              {/* 1. Status Filter */}
+            {/* Filter Dropdowns */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* 1. Payment Status Filter */}
               <select
-                value={txFilters.status}
+                value={txFilters.paymentStatus}
                 onChange={(e) => {
                   setTxFilters((prev) => ({
                     ...prev,
-                    status: e.target.value as 'all' | TransactionStatus,
+                    paymentStatus: e.target.value as 'all' | PaymentStatus,
                   }));
                   setTxPage(1);
                 }}
                 className="w-full px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
               >
-                <option value="all">Status: All Transactions</option>
-                <option value="successful">Status: Successful</option>
-                <option value="pending">Status: Pending</option>
-                <option value="failed">Status: Failed</option>
-                <option value="refunded">Status: Refunded</option>
-                <option value="partially_refunded">
-                  Status: Partially Refunded
-                </option>
+                <option value="all">Payment Status: All</option>
+                <option value="confirmed">Payment Status: Confirmed</option>
+                <option value="pending">Payment Status: Pending</option>
+                <option value="failed">Payment Status: Failed</option>
+                <option value="refunded">Payment Status: Refunded</option>
               </select>
 
-              {/* 2. Date Preset Filter */}
+              {/* 2. Funds Status Filter */}
+              <select
+                value={txFilters.fundsStatus}
+                onChange={(e) => {
+                  setTxFilters((prev) => ({
+                    ...prev,
+                    fundsStatus: e.target.value as 'all' | FundsStatus,
+                  }));
+                  setTxPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
+              >
+                <option value="all">Funds Status: All</option>
+                <option value="in_escrow">Funds Status: In Escrow</option>
+                <option value="awaiting_settlement">
+                  Funds Status: Awaiting Settlement
+                </option>
+                <option value="settled">Funds Status: Settled</option>
+                <option value="refunded">Funds Status: Refunded</option>
+              </select>
+
+              {/* 3. Date Preset Filter */}
               <select
                 value={txFilters.periodPreset}
                 onChange={(e) => {
@@ -1336,48 +802,14 @@ export const SalesAndEarningsView: React.FC = () => {
               >
                 <option value="all">Date: All Recorded Dates</option>
                 <option value="today">Date: Today</option>
-                <option value="yesterday">Date: Yesterday</option>
                 <option value="last_7_days">Date: Last 7 Days</option>
                 <option value="last_30_days">Date: Last 30 Days</option>
                 <option value="this_month">Date: This Month</option>
                 <option value="last_month">Date: Last Month</option>
-                <option value="this_year">Date: This Year</option>
-                <option value="custom">Date: Custom Date Range</option>
+                <option value="custom">Date: Custom Range</option>
               </select>
 
-              {/* 3. Min Amount */}
-              <input
-                type="number"
-                min="0"
-                placeholder="Min Net Amount (₦)"
-                value={txFilters.minAmount}
-                onChange={(e) => {
-                  setTxFilters((prev) => ({
-                    ...prev,
-                    minAmount: e.target.value,
-                  }));
-                  setTxPage(1);
-                }}
-                className="w-full px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 tabular-nums"
-              />
-
-              {/* 4. Max Amount */}
-              <input
-                type="number"
-                min="0"
-                placeholder="Max Net Amount (₦)"
-                value={txFilters.maxAmount}
-                onChange={(e) => {
-                  setTxFilters((prev) => ({
-                    ...prev,
-                    maxAmount: e.target.value,
-                  }));
-                  setTxPage(1);
-                }}
-                className="w-full px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 tabular-nums"
-              />
-
-              {/* 5. Sort By */}
+              {/* 4. Sort By */}
               <select
                 value={txFilters.sortBy}
                 onChange={(e) => {
@@ -1391,14 +823,8 @@ export const SalesAndEarningsView: React.FC = () => {
               >
                 <option value="date_desc">Sort: Date (Newest First)</option>
                 <option value="date_asc">Sort: Date (Oldest First)</option>
-                <option value="net_desc">Sort: Net Amount (High to Low)</option>
-                <option value="net_asc">Sort: Net Amount (Low to High)</option>
-                <option value="gross_desc">
-                  Sort: Gross Amount (High to Low)
-                </option>
-                <option value="gross_asc">
-                  Sort: Gross Amount (Low to High)
-                </option>
+                <option value="amount_desc">Sort: Amount (High to Low)</option>
+                <option value="amount_asc">Sort: Amount (Low to High)</option>
               </select>
             </div>
 
@@ -1406,7 +832,7 @@ export const SalesAndEarningsView: React.FC = () => {
             {txFilters.periodPreset === 'custom' && (
               <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs">
                 <span className="font-semibold text-slate-700">
-                  Custom Transaction Date Range:
+                  Custom Date Range:
                 </span>
                 <div className="flex items-center gap-2">
                   <label className="text-slate-500">From</label>
@@ -1442,10 +868,11 @@ export const SalesAndEarningsView: React.FC = () => {
             )}
 
             {/* Filter Summary & Reset Button */}
-            <div className="flex items-center justify-between pt-1 text-xs text-slate-500">
+            <div className="flex items-center justify-between pt-1 text-xs text-slate-500 flex-wrap gap-2">
               <span>
                 Showing <strong>{filteredTransactions.length}</strong> of{' '}
-                <strong>{transactions.length}</strong> recorded transactions
+                <strong>{transactions.length}</strong> transactions · Click any
+                row to view full details
               </span>
               {hasActiveTxFilters && (
                 <button
@@ -1460,142 +887,98 @@ export const SalesAndEarningsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Transactions Table or Empty State */}
+          {/* Transactions Table (6 columns: Customer, Items / Order Summary, Date, Amount, Payment Status, Funds Status; NO Action column) */}
           {paginatedTransactions.length > 0 ? (
             <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xs overflow-hidden">
               <div className="w-full overflow-x-auto">
-                <table className="w-full min-w-[920px] xl:min-w-0 xl:table-fixed text-left border-collapse text-xs">
+                <table className="w-full min-w-[720px] lg:min-w-0 lg:table-fixed text-left border-collapse text-xs">
                   <thead className="bg-[#5E17EB] text-white">
                     <tr className="font-semibold select-none">
-                      <th className="py-3.5 pl-4 pr-2 whitespace-nowrap xl:w-[13%]">
-                        Date & Time
+                      <th className="py-3.5 pl-4 pr-2.5 lg:w-[17%]">
+                        Customer
                       </th>
-                      <th className="py-3.5 px-2 xl:w-[13%]">Customer Name</th>
-                      <th className="py-3.5 px-2.5 xl:w-[21%]">
+                      <th className="py-3.5 px-2.5 lg:w-[29%]">
                         Items / Order Summary
                       </th>
-                      <th className="py-3.5 px-2 text-right whitespace-nowrap xl:w-[10%]">
-                        Gross Amount
+                      <th className="py-3.5 px-2.5 whitespace-nowrap lg:w-[17%]">
+                        Date
                       </th>
-                      <th className="py-3.5 px-2 text-right whitespace-nowrap xl:w-[9%]">
-                        Discounts
+                      <th className="py-3.5 px-2.5 text-right whitespace-nowrap lg:w-[12%]">
+                        Amount
                       </th>
-                      <th className="py-3.5 px-2 text-right whitespace-nowrap xl:w-[11%]">
-                        Fees & Commissions
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap lg:w-[12%]">
+                        Payment Status
                       </th>
-                      <th className="py-3.5 px-2 text-right whitespace-nowrap xl:w-[10%]">
-                        Net Amount
-                      </th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap xl:w-[11%]">
-                        Transaction Status
-                      </th>
-                      <th className="py-3.5 pl-2 pr-4 text-right whitespace-nowrap xl:w-[10%]">
-                        Actions
+                      <th className="py-3.5 pl-2 pr-4 text-center whitespace-nowrap lg:w-[13%]">
+                        Funds Status
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {paginatedTransactions.map((tx) => (
-                      <tr
-                        key={tx.id}
-                        onClick={() => setSelectedTransactionId(tx.id)}
-                        className="hover:bg-[#F8F9FE] transition-colors cursor-pointer group"
-                      >
-                        {/* 1. Date & Time */}
-                        <td className="py-3.5 pl-4 pr-2 text-slate-600 whitespace-nowrap">
-                          {tx.dateTime}
-                        </td>
-
-                        {/* 2. Customer Name */}
-                        <td className="py-3.5 px-2 font-semibold text-slate-900 group-hover:text-[#5E17EB] transition-colors">
-                          <span
-                            className="block truncate"
-                            title={tx.customerName}
-                          >
-                            {tx.customerName}
-                          </span>
-                        </td>
-
-                        {/* 3. Items / Order Summary */}
-                        <td className="py-3.5 px-2.5 min-w-0">
-                          <p
-                            className="font-medium text-slate-800 truncate"
-                            title={tx.itemSummary}
-                          >
-                            {tx.itemSummary}
-                          </p>
-                          <span className="text-[11px] text-slate-400">
-                            {tx.items.reduce((s, i) => s + i.quantity, 0)}{' '}
-                            {tx.items.reduce((s, i) => s + i.quantity, 0) === 1
-                              ? 'item'
-                              : 'items'}
-                          </span>
-                        </td>
-
-                        {/* 4. Gross Amount */}
-                        <td className="py-3.5 px-2 text-right tabular-nums font-medium text-slate-800 whitespace-nowrap">
-                          {formatNaira(tx.grossAmount)}
-                        </td>
-
-                        {/* 5. Discounts */}
-                        <td className="py-3.5 px-2 text-right tabular-nums whitespace-nowrap">
-                          {tx.totalDiscounts > 0 ? (
-                            <span className="text-emerald-700 font-medium">
-                              -{formatNaira(tx.totalDiscounts)}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">
-                              {formatNaira(0)}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* 6. Fees & Commissions */}
-                        <td className="py-3.5 px-2 text-right tabular-nums whitespace-nowrap">
-                          {tx.merchantFeeAmount > 0 ? (
-                            <span className="text-slate-700 font-medium">
-                              -{formatNaira(tx.merchantFeeAmount)}
-                            </span>
-                          ) : (
-                            <div>
-                              <span className="text-slate-500 block">
-                                {formatNaira(0)}
-                              </span>
-                              {!feeConfig.isConfigured && (
-                                <span className="text-[10px] text-slate-400 block">
-                                  Not configured
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* 7. Net Amount */}
-                        <td className="py-3.5 px-2 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">
-                          {formatNaira(tx.netAmount)}
-                        </td>
-
-                        {/* 8. Transaction Status */}
-                        <td className="py-3.5 px-2 text-center whitespace-nowrap">
-                          <TransactionStatusBadge status={tx.status} />
-                        </td>
-
-                        {/* 9. Actions */}
-                        <td
-                          className="py-3.5 pl-2 pr-4 text-right whitespace-nowrap"
-                          onClick={(e) => e.stopPropagation()}
+                    {paginatedTransactions.map((tx) => {
+                      const itemCount = tx.items.reduce(
+                        (s, i) => s + i.quantity,
+                        0
+                      );
+                      return (
+                        <tr
+                          key={tx.id}
+                          tabIndex={0}
+                          role="button"
+                          onClick={() => setSelectedTransactionId(tx.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedTransactionId(tx.id);
+                            }
+                          }}
+                          className="hover:bg-[#F8F9FE] focus:bg-[#F8F9FE] focus:outline-none transition-colors cursor-pointer group"
                         >
-                          <Button
-                            type="button"
-                            variant="purple-light"
-                            size="sm"
-                            onClick={() => setSelectedTransactionId(tx.id)}
-                          >
-                            View Details
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* 1. Customer */}
+                          <td className="py-3.5 pl-4 pr-2.5 font-semibold text-slate-900 group-hover:text-[#5E17EB] transition-colors align-middle">
+                            <span
+                              className="block truncate"
+                              title={tx.customerName}
+                            >
+                              {tx.customerName}
+                            </span>
+                          </td>
+
+                          {/* 2. Items / Order Summary */}
+                          <td className="py-3.5 px-2.5 min-w-0 align-middle">
+                            <p
+                              className="font-medium text-slate-800 truncate"
+                              title={tx.itemSummary}
+                            >
+                              {tx.itemSummary}
+                            </p>
+                            <span className="text-[11px] text-slate-400 block">
+                              {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                            </span>
+                          </td>
+
+                          {/* 3. Date */}
+                          <td className="py-3.5 px-2.5 text-slate-600 whitespace-nowrap align-middle">
+                            {tx.dateTime}
+                          </td>
+
+                          {/* 4. Amount */}
+                          <td className="py-3.5 px-2.5 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap align-middle">
+                            {formatNaira(tx.orderValue)}
+                          </td>
+
+                          {/* 5. Payment Status */}
+                          <td className="py-3.5 px-2 text-center whitespace-nowrap align-middle">
+                            <PaymentStatusBadge status={tx.paymentStatus} />
+                          </td>
+
+                          {/* 6. Funds Status */}
+                          <td className="py-3.5 pl-2 pr-4 text-center whitespace-nowrap align-middle">
+                            <FundsStatusBadge status={tx.fundsStatus} />
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1613,8 +996,8 @@ export const SalesAndEarningsView: React.FC = () => {
                 </h3>
                 <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                   {transactions.length === 0
-                    ? 'Customer payment transactions will appear here automatically once orders are confirmed.'
-                    : 'Try adjusting your search query, status filter, date range, or amount range.'}
+                    ? 'Customer order transactions will appear here automatically once payments are confirmed.'
+                    : 'Try adjusting your search query, payment status, funds status, or date range.'}
                 </p>
               </div>
               {hasActiveTxFilters && (
@@ -1690,87 +1073,75 @@ export const SalesAndEarningsView: React.FC = () => {
           ========================================================================== */}
       {activeSubTab === 'settlements' && (
         <div className="space-y-6">
-          {/* Settlement Summary Cards */}
+          {/* 3 Settlement Summary Cards: Awaiting Release, Processing, Successfully Paid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* 1. Total Settled */}
+            {/* 1. Awaiting Release */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500">
-                  Total Settled
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-amber-600" />
+                  Awaiting Release
                 </span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Paid Out
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#FEF9C3] text-[#A16207] border border-[#FEF08A]">
+                  {settlementSummaryMetrics.awaitingReleaseCount} In Escrow
                 </span>
               </div>
               <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
-                {formatNaira(settlementSummaryMetrics.totalSettled)}
+                {formatNaira(settlementSummaryMetrics.awaitingRelease)}
               </p>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Total funds successfully paid out to your store bank account.
+                Funds still held in escrow because order delivery has not yet
+                been confirmed.
               </p>
             </div>
 
-            {/* 2. Pending Settlement */}
+            {/* 2. Processing */}
             <div className="bg-[#F8F6FE] border border-[#DDD0FA] rounded-2xl p-5 shadow-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#5E17EB]">
-                  Pending Settlement
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[#5E17EB] flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-[#5E17EB]" />
+                  Processing
                 </span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                  {unsettledQualifyingTransactions.length} Unsettled{' '}
-                  {unsettledQualifyingTransactions.length === 1
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#E0F2FE] text-[#0284C7] border border-[#BAE6FD]">
+                  {settlementSummaryMetrics.processingOrderCount}{' '}
+                  {settlementSummaryMetrics.processingOrderCount === 1
                     ? 'Order'
                     : 'Orders'}
                 </span>
               </div>
               <p className="text-2xl sm:text-3xl font-extrabold text-[#5E17EB] tracking-tight tabular-nums">
-                {formatNaira(settlementSummaryMetrics.pendingSettlement)}
+                {formatNaira(settlementSummaryMetrics.processing)}
               </p>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Earned merchant funds from confirmed sales awaiting settlement
-                payout.
+                Funds from delivered orders included in an automatic settlement
+                currently being processed.
               </p>
             </div>
 
-            {/* 3. Next Scheduled Settlement (only when an actual settlement schedule exists) */}
+            {/* 3. Successfully Paid */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-500">
-                  Next Scheduled Settlement
+                <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Successfully Paid
                 </span>
-                {!settlementSchedule.isConfigured && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                    <Clock className="w-2.5 h-2.5" />
-                    Not Configured
-                  </span>
-                )}
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]">
+                  {settlementSummaryMetrics.paidOrderCount}{' '}
+                  {settlementSummaryMetrics.paidOrderCount === 1
+                    ? 'Order'
+                    : 'Orders'}
+                </span>
               </div>
-              {settlementSchedule.isConfigured &&
-              settlementSchedule.nextScheduledFormatted ? (
-                <>
-                  <p className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                    {settlementSchedule.nextScheduledFormatted}
-                  </p>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    {settlementSchedule.frequencyLabel ||
-                      'Scheduled automated settlement cycle.'}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-lg font-bold text-slate-700 mt-1">
-                    No Schedule Configured
-                  </p>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    No automated payout schedule is currently configured on the
-                    store backend.
-                  </p>
-                </>
-              )}
+              <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight tabular-nums">
+                {formatNaira(settlementSummaryMetrics.successfullyPaid)}
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Funds successfully transferred to your merchant bank account.
+              </p>
             </div>
           </div>
 
-          {/* Settlement Filters Row */}
+          {/* Settlement Filters Bar */}
           <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
               <select
@@ -1784,13 +1155,11 @@ export const SalesAndEarningsView: React.FC = () => {
               >
                 <option value="all">Period: All Time</option>
                 <option value="today">Period: Today</option>
-                <option value="yesterday">Period: Yesterday</option>
                 <option value="last_7_days">Period: Last 7 Days</option>
                 <option value="last_30_days">Period: Last 30 Days</option>
                 <option value="this_month">Period: This Month</option>
                 <option value="last_month">Period: Last Month</option>
-                <option value="this_year">Period: This Year</option>
-                <option value="custom">Period: Custom Date Range</option>
+                <option value="custom">Period: Custom Range</option>
               </select>
 
               <select
@@ -1803,7 +1172,6 @@ export const SalesAndEarningsView: React.FC = () => {
                 className="px-3.5 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
               >
                 <option value="all">Settlement Status: All</option>
-                <option value="pending">Settlement Status: Pending</option>
                 <option value="processing">
                   Settlement Status: Processing
                 </option>
@@ -1856,89 +1224,74 @@ export const SalesAndEarningsView: React.FC = () => {
 
           {/* Settlement History Table */}
           <div className="space-y-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Settlement History
-              </h3>
-              <p className="text-xs text-slate-500">
-                Completed and in-progress payout settlements to your merchant
-                account.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Settlement History
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Automatic payouts combining eligible funds from delivered
+                  orders · Click any row to view included orders and bank
+                  details
+                </p>
+              </div>
             </div>
 
             {filteredSettlements.length > 0 ? (
               <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xs overflow-hidden">
                 <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[780px] lg:min-w-0 lg:table-fixed text-left border-collapse text-xs">
+                  <table className="w-full min-w-[560px] lg:min-w-0 lg:table-fixed text-left border-collapse text-xs">
                     <thead className="bg-[#5E17EB] text-white">
                       <tr className="font-semibold select-none">
-                        <th className="py-3.5 pl-4 pr-2.5 whitespace-nowrap lg:w-[15%]">
+                        <th className="py-3.5 pl-4 pr-3 whitespace-nowrap lg:w-[26%]">
                           Settlement Date
                         </th>
-                        <th className="py-3.5 px-2.5 lg:w-[22%]">
-                          Settlement Period
+                        <th className="py-3.5 px-3 text-center whitespace-nowrap lg:w-[26%]">
+                          Number of Orders Included
                         </th>
-                        <th className="py-3.5 px-2.5 text-right whitespace-nowrap lg:w-[14%]">
-                          Gross Amount
+                        <th className="py-3.5 px-3 text-right whitespace-nowrap lg:w-[26%]">
+                          Settlement Amount
                         </th>
-                        <th className="py-3.5 px-2.5 text-right whitespace-nowrap lg:w-[14%]">
-                          Total Deductions
-                        </th>
-                        <th className="py-3.5 px-2.5 text-right whitespace-nowrap lg:w-[15%]">
-                          Net Settlement Amount
-                        </th>
-                        <th className="py-3.5 px-2 text-center whitespace-nowrap lg:w-[10%]">
+                        <th className="py-3.5 pl-3 pr-4 text-center whitespace-nowrap lg:w-[22%]">
                           Settlement Status
-                        </th>
-                        <th className="py-3.5 pl-2 pr-4 text-right whitespace-nowrap lg:w-[10%]">
-                          Actions
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredSettlements.map((s) => (
-                        <tr
-                          key={s.id}
-                          onClick={() => setSelectedSettlementId(s.id)}
-                          className="hover:bg-[#F8F9FE] transition-colors cursor-pointer group"
-                        >
-                          <td className="py-3.5 pl-4 pr-2.5 font-semibold text-slate-900 whitespace-nowrap">
-                            {s.settlementDate}
-                          </td>
-                          <td className="py-3.5 px-2.5 text-slate-700">
-                            <span className="block truncate">
-                              {s.settlementPeriodLabel}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-2.5 text-right tabular-nums font-medium text-slate-800 whitespace-nowrap">
-                            {formatNaira(s.grossAmount)}
-                          </td>
-                          <td className="py-3.5 px-2.5 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                            {s.totalDeductions > 0
-                              ? `-${formatNaira(s.totalDeductions)}`
-                              : formatNaira(0)}
-                          </td>
-                          <td className="py-3.5 px-2.5 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">
-                            {formatNaira(s.netSettlementAmount)}
-                          </td>
-                          <td className="py-3.5 px-2 text-center whitespace-nowrap">
-                            <SettlementStatusBadge status={s.status} />
-                          </td>
-                          <td
-                            className="py-3.5 pl-2 pr-4 text-right whitespace-nowrap"
-                            onClick={(e) => e.stopPropagation()}
+                      {filteredSettlements.map((s) => {
+                        const count =
+                          s.orders.length > 0
+                            ? s.orders.length
+                            : s.transactionIds.length;
+                        return (
+                          <tr
+                            key={s.id}
+                            tabIndex={0}
+                            role="button"
+                            onClick={() => setSelectedSettlementId(s.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setSelectedSettlementId(s.id);
+                              }
+                            }}
+                            className="hover:bg-[#F8F9FE] focus:bg-[#F8F9FE] focus:outline-none transition-colors cursor-pointer group"
                           >
-                            <Button
-                              type="button"
-                              variant="purple-light"
-                              size="sm"
-                              onClick={() => setSelectedSettlementId(s.id)}
-                            >
-                              View Details
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                            <td className="py-3.5 pl-4 pr-3 font-semibold text-slate-900 group-hover:text-[#5E17EB] transition-colors whitespace-nowrap align-middle">
+                              {s.settlementDate}
+                            </td>
+                            <td className="py-3.5 px-3 text-center font-medium text-slate-700 whitespace-nowrap align-middle">
+                              {count} {count === 1 ? 'order' : 'orders'}
+                            </td>
+                            <td className="py-3.5 px-3 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap align-middle">
+                              {formatNaira(s.settlementAmount)}
+                            </td>
+                            <td className="py-3.5 pl-3 pr-4 text-center whitespace-nowrap align-middle">
+                              <SettlementStatusBadge status={s.status} />
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1951,877 +1304,13 @@ export const SalesAndEarningsView: React.FC = () => {
                 <h4 className="text-sm font-bold text-slate-800">
                   {settlements.length === 0
                     ? 'No settlement history yet'
-                    : 'No settlements matching the selected period or status'}
+                    : 'No settlements matching the selected filters'}
                 </h4>
                 <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                   {settlements.length === 0
-                    ? 'No payout settlement batches have been recorded yet. All earned store funds are currently held in Pending Settlement below.'
-                    : 'No recorded settlement batches matched your selected period or status filter.'}
+                    ? 'Automatic settlements will appear here once delivered orders are batched for payout.'
+                    : 'Try adjusting your period or status filter to view settlement records.'}
                 </p>
-              </div>
-            )}
-          </div>
-
-          {/* Pending Settlement Breakdown: Unsettled Transactions Awaiting Payout */}
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Pending Settlement Breakdown (Unsettled Earnings)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Successful transactions awaiting settlement payout (
-                  {formatNaira(settlementSummaryMetrics.pendingSettlement)}{' '}
-                  total net pending).
-                </p>
-              </div>
-            </div>
-
-            {unsettledQualifyingTransactions.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-xs space-y-2">
-                <p className="text-sm font-bold text-slate-800">
-                  No pending settlements for this period
-                </p>
-                <p className="text-xs text-slate-500">
-                  There are no unsettled transactions in the selected period.
-                </p>
-              </div>
-            ) : (
-              <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xs overflow-hidden">
-                <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[780px] lg:min-w-0 lg:table-fixed text-left border-collapse text-xs">
-                    <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
-                      <tr className="font-semibold select-none">
-                        <th className="py-3 pl-4 pr-2.5 whitespace-nowrap lg:w-[16%]">
-                          Transaction Date
-                        </th>
-                        <th className="py-3 px-2.5 lg:w-[16%]">Customer Name</th>
-                        <th className="py-3 px-2.5 lg:w-[24%]">
-                          Items / Order Summary
-                        </th>
-                        <th className="py-3 px-2 text-right whitespace-nowrap lg:w-[11%]">
-                          Gross Amount
-                        </th>
-                        <th className="py-3 px-2 text-right whitespace-nowrap lg:w-[11%]">
-                          Deductions
-                        </th>
-                        <th className="py-3 px-2 text-right whitespace-nowrap lg:w-[12%]">
-                          Unsettled Net
-                        </th>
-                        <th className="py-3 pl-2 pr-4 text-right whitespace-nowrap lg:w-[10%]">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {unsettledQualifyingTransactions.map((tx) => (
-                        <tr
-                          key={tx.id}
-                          onClick={() => setSelectedTransactionId(tx.id)}
-                          className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                        >
-                          <td className="py-3 pl-4 pr-2.5 text-slate-600 whitespace-nowrap">
-                            {tx.dateTime}
-                          </td>
-                          <td className="py-3 px-2.5 font-semibold text-slate-900 truncate">
-                            {tx.customerName}
-                          </td>
-                          <td className="py-3 px-2.5 text-slate-700 truncate">
-                            {tx.itemSummary}
-                          </td>
-                          <td className="py-3 px-2 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                            {formatNaira(tx.grossAmount)}
-                          </td>
-                          <td className="py-3 px-2 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                            {tx.totalDiscounts + tx.merchantFeeAmount > 0
-                              ? `-${formatNaira(
-                                  tx.totalDiscounts + tx.merchantFeeAmount
-                                )}`
-                              : formatNaira(0)}
-                          </td>
-                          <td className="py-3 px-2 text-right tabular-nums font-bold text-[#5E17EB] whitespace-nowrap">
-                            {formatNaira(tx.netAmount)}
-                          </td>
-                          <td
-                            className="py-3 pl-2 pr-4 text-right whitespace-nowrap"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Button
-                              type="button"
-                              variant="purple-light"
-                              size="sm"
-                              onClick={() => setSelectedTransactionId(tx.id)}
-                            >
-                              View Details
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ==========================================================================
-          TAB 4: REPORTS
-          ========================================================================== */}
-      {activeSubTab === 'reports' && (
-        <div className="space-y-6">
-          {/* Report Category Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            {REPORT_CATEGORIES.map((cat) => {
-              const isSelected = reportCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setReportCategory(cat.id)}
-                  className={`text-left p-4 rounded-2xl border transition-all ${
-                    isSelected
-                      ? 'bg-[#F8F6FE] border-[#5E17EB] ring-1 ring-[#5E17EB]/20 shadow-xs'
-                      : 'bg-white border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/40'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`text-xs sm:text-sm font-bold ${
-                        isSelected ? 'text-[#5E17EB]' : 'text-slate-900'
-                      }`}
-                    >
-                      {cat.title}
-                    </span>
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                        isSelected ? 'bg-[#5E17EB]' : 'bg-slate-200'
-                      }`}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-                    {cat.subtitle}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Report Filters & Export Action Bar */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-3">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
-                {/* 1. Date Range Preset */}
-                <select
-                  value={reportPreset}
-                  onChange={(e) =>
-                    setReportPreset(e.target.value as ReportingPeriodPreset)
-                  }
-                  className="w-full px-3.5 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
-                >
-                  {PERIOD_PRESETS.map((preset) => (
-                    <option key={preset} value={preset}>
-                      Period: {REPORTING_PERIOD_LABELS[preset]}
-                    </option>
-                  ))}
-                </select>
-
-                {/* 2. Transaction Status Filter (where relevant) */}
-                {reportCategory !== 'product_performance_report' ? (
-                  <select
-                    value={reportStatusFilter}
-                    onChange={(e) =>
-                      setReportStatusFilter(
-                        e.target.value as 'all' | TransactionStatus
-                      )
-                    }
-                    className="w-full px-3.5 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
-                  >
-                    <option value="all">Status: All Transactions</option>
-                    <option value="successful">Status: Successful</option>
-                    <option value="pending">Status: Pending</option>
-                    <option value="failed">Status: Failed</option>
-                    <option value="refunded">Status: Refunded</option>
-                    <option value="partially_refunded">
-                      Status: Partially Refunded
-                    </option>
-                  </select>
-                ) : (
-                  <div className="px-3.5 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl text-slate-500 flex items-center">
-                    Status: Qualifying Sales Only
-                  </div>
-                )}
-
-                {/* 3. Product Filter */}
-                <select
-                  value={reportProductFilter}
-                  onChange={(e) => setReportProductFilter(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 cursor-pointer"
-                >
-                  <option value="all">Product: All Store Products</option>
-                  {availableReportProducts.map((prodName) => (
-                    <option key={prodName} value={prodName}>
-                      Product: {prodName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 self-end lg:self-auto">
-                {hasActiveReportFilters && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-                    onClick={handleResetReportFilters}
-                  >
-                    Reset
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  isLoading={isExportingCsv}
-                  leftIcon={<Download className="w-3.5 h-3.5" />}
-                  onClick={handleExportReportCsv}
-                >
-                  Export Report (CSV)
-                </Button>
-              </div>
-            </div>
-
-            {reportPreset === 'custom' && (
-              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs">
-                <span className="font-semibold text-slate-700">
-                  Custom Report Date Range:
-                </span>
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-500">Start Date</label>
-                  <input
-                    type="date"
-                    value={reportCustomFrom}
-                    onChange={(e) => setReportCustomFrom(e.target.value)}
-                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-500">End Date</label>
-                  <input
-                    type="date"
-                    value={reportCustomTo}
-                    onChange={(e) => setReportCustomTo(e.target.value)}
-                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Active Report Header Banner */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-900">
-                  {
-                    REPORT_CATEGORIES.find((c) => c.id === reportCategory)
-                      ?.title
-                  }
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Reporting Period: <strong>{reportWindow.label}</strong> (
-                  {reportWindow.formattedRange}) · {reportWindow.timezoneLabel}
-                  {reportProductFilter !== 'all' &&
-                    ` · Product: ${reportProductFilter}`}
-                </p>
-              </div>
-            </div>
-
-            {/* REPORT 1: SALES REPORT */}
-            {reportCategory === 'sales_report' && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-xs text-slate-500 block">
-                      Total Gross Sales
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.grossSales)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-xs text-slate-500 block">
-                      Total Discounts
-                    </span>
-                    <span className="text-lg font-extrabold text-emerald-700 mt-1 block tabular-nums">
-                      {reportMetrics.totalDiscounts > 0
-                        ? `-${formatNaira(reportMetrics.totalDiscounts)}`
-                        : formatNaira(0)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA]">
-                    <span className="text-xs font-semibold text-[#5E17EB] block">
-                      Total Net Sales
-                    </span>
-                    <span className="text-lg font-extrabold text-[#5E17EB] mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.netEarnings)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-xs text-slate-500 block">
-                      Number of Orders
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {reportMetrics.qualifyingOrderCount}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 col-span-2 sm:col-span-1">
-                    <span className="text-xs text-slate-500 block">
-                      Average Order Value
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.averageOrderValue)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Sales Breakdown Table over Selected Period */}
-                {reportMetrics.qualifyingOrderCount === 0 ? (
-                  <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center space-y-2 bg-slate-50/40">
-                    <p className="text-sm font-bold text-slate-800">
-                      No sales data matching the selected filters
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      There were no qualifying sales transactions during{' '}
-                      {reportWindow.formattedRange}.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="w-full overflow-x-auto">
-                      <table className="w-full min-w-[680px] text-left text-xs border-collapse">
-                        <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
-                          <tr>
-                            <th className="py-3 px-4">Date / Time Interval</th>
-                            <th className="py-3 px-3 text-center whitespace-nowrap">
-                              Orders
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Gross Sales
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Discounts
-                            </th>
-                            <th className="py-3 px-4 text-right whitespace-nowrap">
-                              Net Sales
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {reportChartBuckets
-                            .filter((b) => b.orderCount > 0 || b.grossSales > 0)
-                            .map((b) => (
-                              <tr key={b.key} className="hover:bg-slate-50/70">
-                                <td className="py-3 px-4 font-semibold text-slate-900">
-                                  {b.fullLabel}
-                                </td>
-                                <td className="py-3 px-3 text-center font-bold text-slate-800 tabular-nums">
-                                  {b.orderCount}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-slate-700">
-                                  {formatNaira(b.grossSales)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-emerald-700">
-                                  {b.discounts > 0
-                                    ? `-${formatNaira(b.discounts)}`
-                                    : formatNaira(0)}
-                                </td>
-                                <td className="py-3 px-4 text-right tabular-nums font-bold text-slate-900">
-                                  {formatNaira(b.netSales)}
-                                </td>
-                              </tr>
-                            ))}
-                        </tbody>
-                        <tfoot className="bg-slate-50 border-t border-slate-200 font-extrabold text-slate-900">
-                          <tr>
-                            <td className="py-3 px-4">Period Total</td>
-                            <td className="py-3 px-3 text-center tabular-nums">
-                              {reportMetrics.qualifyingOrderCount}
-                            </td>
-                            <td className="py-3 px-3 text-right tabular-nums">
-                              {formatNaira(reportMetrics.grossSales)}
-                            </td>
-                            <td className="py-3 px-3 text-right tabular-nums text-emerald-700">
-                              {reportMetrics.totalDiscounts > 0
-                                ? `-${formatNaira(
-                                    reportMetrics.totalDiscounts
-                                  )}`
-                                : formatNaira(0)}
-                            </td>
-                            <td className="py-3 px-4 text-right tabular-nums text-[#5E17EB]">
-                              {formatNaira(reportMetrics.netEarnings)}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* REPORT 2: TRANSACTION REPORT */}
-            {reportCategory === 'transaction_report' && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-                  <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
-                    <span className="text-xs font-medium text-emerald-800 block">
-                      Successful
-                    </span>
-                    <span className="text-xl font-extrabold text-emerald-900 mt-1 block tabular-nums">
-                      {
-                        reportFilteredTransactions.filter(
-                          (t) => t.status === 'successful'
-                        ).length
-                      }
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200">
-                    <span className="text-xs font-medium text-amber-800 block">
-                      Pending
-                    </span>
-                    <span className="text-xl font-extrabold text-amber-900 mt-1 block tabular-nums">
-                      {
-                        reportFilteredTransactions.filter(
-                          (t) => t.status === 'pending'
-                        ).length
-                      }
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-red-50/60 border border-red-200">
-                    <span className="text-xs font-medium text-red-800 block">
-                      Failed
-                    </span>
-                    <span className="text-xl font-extrabold text-red-900 mt-1 block tabular-nums">
-                      {
-                        reportFilteredTransactions.filter(
-                          (t) => t.status === 'failed'
-                        ).length
-                      }
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-100 border border-slate-200">
-                    <span className="text-xs font-medium text-slate-700 block">
-                      Refunded / Partial
-                    </span>
-                    <span className="text-xl font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {
-                        reportFilteredTransactions.filter(
-                          (t) =>
-                            t.status === 'refunded' ||
-                            t.status === 'partially_refunded'
-                        ).length
-                      }
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA] col-span-2 sm:col-span-1">
-                    <span className="text-xs font-semibold text-[#5E17EB] block">
-                      Total Net Transaction Value
-                    </span>
-                    <span className="text-lg font-extrabold text-[#5E17EB] mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.netEarnings)}
-                    </span>
-                  </div>
-                </div>
-
-                {reportFilteredTransactions.length === 0 ? (
-                  <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center space-y-2 bg-slate-50/40">
-                    <p className="text-sm font-bold text-slate-800">
-                      No transactions matching the selected filters
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Adjust the reporting period, status, or product filter to
-                      view transaction records.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="w-full overflow-x-auto">
-                      <table className="w-full min-w-[780px] text-left text-xs border-collapse">
-                        <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
-                          <tr>
-                            <th className="py-3 px-3.5 whitespace-nowrap">
-                              Date & Time
-                            </th>
-                            <th className="py-3 px-3">Customer Name</th>
-                            <th className="py-3 px-3">Items Summary</th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Gross Amount
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Discounts
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Net Amount
-                            </th>
-                            <th className="py-3 px-3 text-center whitespace-nowrap">
-                              Status
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {reportFilteredTransactions.map((tx) => (
-                            <tr
-                              key={tx.id}
-                              onClick={() => setSelectedTransactionId(tx.id)}
-                              className="hover:bg-slate-50/80 cursor-pointer"
-                            >
-                              <td className="py-3 px-3.5 text-slate-600 whitespace-nowrap">
-                                {tx.dateTime}
-                              </td>
-                              <td className="py-3 px-3 font-semibold text-slate-900">
-                                {tx.customerName}
-                              </td>
-                              <td className="py-3 px-3 text-slate-700 max-w-xs truncate">
-                                {tx.itemSummary}
-                              </td>
-                              <td className="py-3 px-3 text-right tabular-nums text-slate-800 whitespace-nowrap">
-                                {formatNaira(tx.grossAmount)}
-                              </td>
-                              <td className="py-3 px-3 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                                {tx.totalDiscounts > 0
-                                  ? `-${formatNaira(tx.totalDiscounts)}`
-                                  : formatNaira(0)}
-                              </td>
-                              <td className="py-3 px-3 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">
-                                {formatNaira(tx.netAmount)}
-                              </td>
-                              <td className="py-3 px-3 text-center whitespace-nowrap">
-                                <TransactionStatusBadge status={tx.status} />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* REPORT 3: EARNINGS REPORT */}
-            {reportCategory === 'earnings_report' && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-xs text-slate-500 block">
-                      Gross Sales
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.grossSales)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                    <span className="text-xs text-slate-500 block">
-                      Commissions & Fees
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.feesAndCommissions)}
-                    </span>
-                    {!reportMetrics.isFeeConfigAvailable && (
-                      <span className="text-[10px] text-slate-400 block">
-                        Not configured
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-4 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA]">
-                    <span className="text-xs font-semibold text-[#5E17EB] block">
-                      Net Earnings
-                    </span>
-                    <span className="text-lg font-extrabold text-[#5E17EB] mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.netEarnings)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200">
-                    <span className="text-xs font-medium text-amber-800 block">
-                      Pending Settlement
-                    </span>
-                    <span className="text-lg font-extrabold text-amber-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.pendingSettlement)}
-                    </span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200 col-span-2 sm:col-span-1">
-                    <span className="text-xs font-medium text-emerald-800 block">
-                      Settled Amount
-                    </span>
-                    <span className="text-lg font-extrabold text-emerald-900 mt-1 block tabular-nums">
-                      {formatNaira(reportMetrics.totalSettled)}
-                    </span>
-                  </div>
-                </div>
-
-                {reportMetrics.qualifyingOrderCount === 0 ? (
-                  <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center space-y-2 bg-slate-50/40">
-                    <p className="text-sm font-bold text-slate-800">
-                      No earnings data available for this period
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Select a period with confirmed transactions to review
-                      merchant earnings.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="w-full overflow-x-auto">
-                      <table className="w-full min-w-[740px] text-left text-xs border-collapse">
-                        <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
-                          <tr>
-                            <th className="py-3 px-3.5">Date & Time</th>
-                            <th className="py-3 px-3">Customer Name</th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Gross Sales
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Discounts
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Fees & Commissions
-                            </th>
-                            <th className="py-3 px-3 text-right whitespace-nowrap">
-                              Net Earnings
-                            </th>
-                            <th className="py-3 px-3.5 text-center whitespace-nowrap">
-                              Settlement State
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {reportFilteredTransactions
-                            .filter(
-                              (tx) =>
-                                tx.status === 'successful' ||
-                                tx.status === 'partially_refunded'
-                            )
-                            .map((tx) => (
-                              <tr
-                                key={tx.id}
-                                onClick={() => setSelectedTransactionId(tx.id)}
-                                className="hover:bg-slate-50/80 cursor-pointer"
-                              >
-                                <td className="py-3 px-3.5 text-slate-600 whitespace-nowrap">
-                                  {tx.dateTime}
-                                </td>
-                                <td className="py-3 px-3 font-semibold text-slate-900">
-                                  {tx.customerName}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-slate-800 whitespace-nowrap">
-                                  {formatNaira(tx.grossAmount)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                                  {tx.totalDiscounts > 0
-                                    ? `-${formatNaira(tx.totalDiscounts)}`
-                                    : formatNaira(0)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-slate-600 whitespace-nowrap">
-                                  {tx.merchantFeeAmount > 0
-                                    ? `-${formatNaira(tx.merchantFeeAmount)}`
-                                    : formatNaira(0)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums font-bold text-[#5E17EB] whitespace-nowrap">
-                                  {formatNaira(tx.netAmount)}
-                                </td>
-                                <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                                  {tx.settlementStatus === 'paid' ? (
-                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                      Settled
-                                    </span>
-                                  ) : (
-                                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                      Pending Settlement
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* REPORT 4: PRODUCT PERFORMANCE REPORT */}
-            {reportCategory === 'product_performance_report' && (
-              <div className="space-y-5">
-                {reportProductPerformance.length === 0 ? (
-                  <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center space-y-2 bg-slate-50/40">
-                    <p className="text-sm font-bold text-slate-800">
-                      No product performance data for the selected filters
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Select a period with confirmed product sales to generate
-                      this report.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Top Highlights: Best by Value & Best by Quantity */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                      <div className="p-4 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA]">
-                        <span className="text-[11px] font-semibold text-[#5E17EB] block">
-                          Top Product by Sales Value
-                        </span>
-                        <span className="text-sm font-extrabold text-slate-900 mt-1 block truncate">
-                          {reportProductPerformance[0]?.productName}
-                        </span>
-                        <span className="text-xs font-bold text-[#5E17EB] tabular-nums">
-                          {formatNaira(
-                            reportProductPerformance[0]?.netSalesValue || 0
-                          )}
-                        </span>
-                      </div>
-
-                      {(() => {
-                        const topByQty = [...reportProductPerformance].sort(
-                          (a, b) => b.quantitySold - a.quantitySold
-                        )[0];
-                        return (
-                          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                            <span className="text-[11px] font-medium text-slate-500 block">
-                              Top Product by Quantity Sold
-                            </span>
-                            <span className="text-sm font-extrabold text-slate-900 mt-1 block truncate">
-                              {topByQty?.productName}
-                            </span>
-                            <span className="text-xs font-bold text-slate-700 tabular-nums">
-                              {topByQty?.quantitySold || 0} units sold
-                            </span>
-                          </div>
-                        );
-                      })()}
-
-                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                        <span className="text-[11px] font-medium text-slate-500 block">
-                          Total Units Sold
-                        </span>
-                        <span className="text-lg font-extrabold text-slate-900 mt-1 block tabular-nums">
-                          {reportProductPerformance.reduce(
-                            (s, p) => s + p.quantitySold,
-                            0
-                          )}
-                        </span>
-                      </div>
-
-                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70">
-                        <span className="text-[11px] font-medium text-slate-500 block">
-                          Product Discounts Applied
-                        </span>
-                        <span className="text-lg font-extrabold text-emerald-700 mt-1 block tabular-nums">
-                          {formatNaira(
-                            reportProductPerformance.reduce(
-                              (s, p) => s + p.productDiscountsApplied,
-                              0
-                            )
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Product Performance Table */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="w-full overflow-x-auto">
-                        <table className="w-full min-w-[760px] text-left text-xs border-collapse">
-                          <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
-                            <tr>
-                              <th className="py-3 px-4">Product Name</th>
-                              <th className="py-3 px-2.5 text-center whitespace-nowrap">
-                                Orders
-                              </th>
-                              <th className="py-3 px-2.5 text-center whitespace-nowrap">
-                                Qty Sold
-                              </th>
-                              <th className="py-3 px-3 text-right whitespace-nowrap">
-                                Gross Sales Value
-                              </th>
-                              <th className="py-3 px-3 text-right whitespace-nowrap">
-                                Product Discounts
-                              </th>
-                              <th className="py-3 px-3 text-right whitespace-nowrap">
-                                Promo Discounts
-                              </th>
-                              <th className="py-3 px-4 text-right whitespace-nowrap">
-                                Net Sales Value
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {reportProductPerformance.map((p) => (
-                              <tr
-                                key={p.productKey}
-                                className="hover:bg-slate-50/80"
-                              >
-                                <td className="py-3 px-4 font-semibold text-slate-900">
-                                  <div className="flex items-center gap-2.5">
-                                    <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center">
-                                      {p.image ? (
-                                        <img
-                                          src={p.image}
-                                          alt={p.productName}
-                                          className="w-full h-full object-cover"
-                                        />
-                                      ) : (
-                                        <Package className="w-4 h-4 text-slate-400" />
-                                      )}
-                                    </div>
-                                    <div>
-                                      <span className="block">
-                                        {p.productName}
-                                      </span>
-                                      {p.unit && (
-                                        <span className="text-[11px] text-slate-400 font-normal">
-                                          Unit: {p.unit}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-2.5 text-center tabular-nums text-slate-700">
-                                  {p.ordersCount}
-                                </td>
-                                <td className="py-3 px-2.5 text-center tabular-nums font-bold text-slate-900">
-                                  {p.quantitySold}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-slate-800 whitespace-nowrap">
-                                  {formatNaira(p.grossSalesValue)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                                  {p.productDiscountsApplied > 0
-                                    ? `-${formatNaira(
-                                        p.productDiscountsApplied
-                                      )}`
-                                    : formatNaira(0)}
-                                </td>
-                                <td className="py-3 px-3 text-right tabular-nums text-emerald-700 whitespace-nowrap">
-                                  {p.promotionDiscountsAllocated > 0
-                                    ? `-${formatNaira(
-                                        p.promotionDiscountsAllocated
-                                      )}`
-                                    : formatNaira(0)}
-                                </td>
-                                <td className="py-3 px-4 text-right tabular-nums font-bold text-[#5E17EB] whitespace-nowrap">
-                                  {formatNaira(p.netSalesValue)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
             )}
           </div>
@@ -2831,7 +1320,7 @@ export const SalesAndEarningsView: React.FC = () => {
       {/* Transaction Details Modal */}
       <TransactionDetailsModal
         transaction={selectedTransaction}
-        feeConfig={feeConfig}
+        settlement={selectedTransactionSettlement}
         isOpen={!!selectedTransaction}
         onClose={() => setSelectedTransactionId(null)}
       />
@@ -2839,7 +1328,6 @@ export const SalesAndEarningsView: React.FC = () => {
       {/* Settlement Details Modal */}
       <SettlementDetailsModal
         settlement={selectedSettlement}
-        feeConfig={feeConfig}
         isOpen={!!selectedSettlement}
         onClose={() => setSelectedSettlementId(null)}
       />

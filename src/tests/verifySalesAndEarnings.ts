@@ -1,16 +1,14 @@
 import {
   SalesStorage,
-  buildCsvContent,
   buildSalesChartBuckets,
-  calculateFinancialMetrics,
-  calculatePeriodComparison,
+  calculateOverviewMetrics,
   calculateProductPerformance,
+  calculateSettlementSummaryMetrics,
   filterSettlementsByWindow,
   filterTransactionsByWindow,
   getReferenceDate,
   resolveReportingPeriodWindow,
 } from '../services/salesStorage';
-import type { SettlementRecord } from '../types/sales';
 
 // Mock localStorage in memory for verification
 const mockStorage: Record<string, string> = {};
@@ -41,250 +39,153 @@ function assert(condition: boolean, message: string) {
   console.log(`[PASS] ${message}`);
 }
 
-console.log('--- RUNNING SALES & EARNINGS VERIFICATION SUITE ---');
+console.log('--- RUNNING REVISED SALES & EARNINGS VERIFICATION SUITE ---');
 
-// 1. Verify initial transactions derived from actual MOCK_ORDERS
-const initialTransactions = SalesStorage.getTransactions();
-const feeConfig = SalesStorage.getFeeConfig();
-const initialSettlements = SalesStorage.getSettlements();
+// 1. Verify initial transactions and combined settlements
+const transactions = SalesStorage.getTransactions();
+const settlements = SalesStorage.getSettlements();
 
 assert(
-  initialTransactions.length === 7,
-  `Loaded 7 actual store transactions from OrderStorage (got ${initialTransactions.length})`
+  transactions.length === 11,
+  `Loaded 11 transactions across active and historical store orders (got ${transactions.length})`
 );
 assert(
-  feeConfig.isConfigured === false,
-  'Default MerchantFeeConfig is unconfigured (no fabricated commission percentage)'
+  settlements.length === 2,
+  `Loaded 2 automatic combined settlements (got ${settlements.length})`
+);
+
+// 2. Verify 'Picked Up' order status does NOT automatically release escrow
+const pickedUpInEscrow = transactions.find(
+  (t) => t.sourceOrderId === 'ord-1005'
 );
 assert(
-  initialSettlements.length === 0,
-  'Default SettlementRecord list is empty (no fabricated settlement records)'
+  pickedUpInEscrow !== undefined &&
+    pickedUpInEscrow.orderStatusLabel === 'Picked Up' &&
+    pickedUpInEscrow.paymentStatus === 'confirmed' &&
+    pickedUpInEscrow.deliveryConfirmed === false &&
+    pickedUpInEscrow.fundsStatus === 'in_escrow',
+  'Order ord-1005 (Picked Up by runner) remains In Escrow until customer delivery confirmation code is verified'
 );
 
-const refDate = getReferenceDate(initialTransactions);
+// 3. Verify Processing settlement orders have fundsStatus === 'awaiting_settlement' (not 'settled')
+const processingSettlement = settlements.find(
+  (s) => s.id === 'set-2026-1109'
+);
+assert(
+  processingSettlement !== undefined &&
+    processingSettlement.status === 'processing' &&
+    processingSettlement.orders.length === 2 &&
+    processingSettlement.settlementAmount === 120500,
+  'Processing settlement set-2026-1109 combines 2 delivered orders totaling ₦120,500'
+);
 
-// 2. Verify Last 7 Days (Nov 4 – Nov 10, 2026) metrics against actual MOCK_ORDERS
+const processingOrderTx = transactions.find(
+  (t) => t.sourceOrderId === 'ord-1004'
+);
+assert(
+  processingOrderTx !== undefined &&
+    processingOrderTx.deliveryConfirmed === true &&
+    processingOrderTx.fundsStatus === 'awaiting_settlement',
+  'Delivered order in a Processing settlement has Funds Status = Awaiting Settlement (never prematurely marked Settled)'
+);
+
+// 4. Verify Paid settlement orders have fundsStatus === 'settled'
+const paidSettlement = settlements.find((s) => s.id === 'set-2026-1106');
+assert(
+  paidSettlement !== undefined &&
+    paidSettlement.status === 'paid' &&
+    paidSettlement.orders.length === 2 &&
+    paidSettlement.settlementAmount === 116000 &&
+    paidSettlement.transactionReference === 'NIP-GTB-20261106-884120',
+  'Paid settlement set-2026-1106 combines 2 delivered orders totaling ₦116,000 with bank & reference details'
+);
+
+const settledOrderTx = transactions.find((t) => t.sourceOrderId === 'ord-0998');
+assert(
+  settledOrderTx !== undefined &&
+    settledOrderTx.deliveryConfirmed === true &&
+    settledOrderTx.fundsStatus === 'settled',
+  'Delivered order in a Paid settlement has Funds Status = Settled'
+);
+
+// 5. Verify Refunded transaction handling
+const refundedTx = transactions.find((t) => t.sourceOrderId === 'ord-1001');
+assert(
+  refundedTx !== undefined &&
+    refundedTx.paymentStatus === 'refunded' &&
+    refundedTx.fundsStatus === 'refunded' &&
+    refundedTx.refundedAmount === 25000 &&
+    refundedTx.netAmount === 0,
+  'Refunded transaction ord-1001 has Payment Status = Refunded, Funds Status = Refunded, and ₦0 net sales contribution'
+);
+
+// 6. Verify Overview & Settlements metrics reconciliation (Zero double-counting)
+const refDate = getReferenceDate(transactions);
 const last7Window = resolveReportingPeriodWindow(
   'last_7_days',
   undefined,
   undefined,
   refDate
 );
-const last7Tx = filterTransactionsByWindow(initialTransactions, last7Window);
-const last7Metrics = calculateFinancialMetrics(last7Tx, [], feeConfig);
+const last7Tx = filterTransactionsByWindow(transactions, last7Window);
+const last7Settlements = filterSettlementsByWindow(settlements, last7Window);
 
-// Expected from actual MOCK_ORDERS:
-// Gross Sales = 63,500 + 60,000 + 90,000 + 45,000 + 62,000 + 82,000 + 35,000 = 437,500
-// Product Discounts = 2,000 + 3,000 + 0 + 0 + 0 + 4,000 + 0 = 9,000
-// Promotion Discounts = 6,150 + 3,000 + 9,000 + 0 + 3,000 + 0 + 0 = 21,150
-// Total Discounts = 30,150
-// Net Earnings = 437,500 - 30,150 = 407,350
-// Pending Settlement = 407,350, Total Settled = 0
-assert(
-  last7Metrics.grossSales === 437500,
-  `Last 7 Days Gross Sales = ₦437,500 (got ${last7Metrics.grossSales})`
-);
-assert(
-  last7Metrics.productDiscounts === 9000,
-  `Last 7 Days Product Discounts = ₦9,000 (got ${last7Metrics.productDiscounts})`
-);
-assert(
-  last7Metrics.promotionDiscounts === 21150,
-  `Last 7 Days Promotion Discounts = ₦21,150 (got ${last7Metrics.promotionDiscounts})`
-);
-assert(
-  last7Metrics.totalDiscounts === 30150,
-  `Last 7 Days Total Discounts = ₦30,150 (got ${last7Metrics.totalDiscounts})`
-);
-assert(
-  last7Metrics.feesAndCommissions === 0 &&
-    !last7Metrics.isFeeConfigAvailable,
-  'Last 7 Days Fees & Commissions = ₦0 (unconfigured state)'
-);
-assert(
-  last7Metrics.netEarnings === 407350,
-  `Last 7 Days Net Earnings = ₦407,350 (got ${last7Metrics.netEarnings})`
-);
-assert(
-  last7Metrics.pendingSettlement === 407350 &&
-    last7Metrics.totalSettled === 0,
-  'Last 7 Days Pending Settlement = ₦407,350 and Total Settled = ₦0'
+const overviewMetrics = calculateOverviewMetrics(last7Tx);
+const settlementMetrics = calculateSettlementSummaryMetrics(
+  last7Tx,
+  last7Settlements
 );
 
-// 3. Verify Today (Nov 10, 2026) vs Yesterday (Nov 09, 2026) & Period Comparison
-const todayWindow = resolveReportingPeriodWindow(
-  'today',
-  undefined,
-  undefined,
-  refDate
-);
-const todayTx = filterTransactionsByWindow(initialTransactions, todayWindow);
-const todayMetrics = calculateFinancialMetrics(todayTx, [], feeConfig);
-// Nov 10 has ord-1024 (55,350), ord-1023 (54,000), ord-1022 (81,000) -> Net = 190,350, Gross = 213,500
+// Expected:
+// In Escrow (Awaiting Release): 55,350 + 54,000 + 81,000 + 45,000 + 59,000 + 78,000 = 372,350 (6 orders)
+// Awaiting Settlement (Processing): 61,500 + 59,000 = 120,500 (2 orders)
+// Released (Successfully Paid): 35,000 + 81,000 = 116,000 (2 orders)
+// Total Sales = 372,350 + 120,500 + 116,000 = 608,850 (10 paid orders)
 assert(
-  todayMetrics.qualifyingOrderCount === 3 &&
-    todayMetrics.grossSales === 213500 &&
-    todayMetrics.netEarnings === 190350,
-  `Today (Nov 10) has 3 orders, Gross ₦213,500, Net ₦190,350`
-);
-
-const todayComparison = calculatePeriodComparison(
-  initialTransactions,
-  todayWindow
-);
-// Yesterday (Nov 9) has ord-1021 (45,000) and ord-1019 (59,000) -> Net = 104,000
-// Percentage change = ((190350 - 104000) / 104000) * 100 = +83.0%
-assert(
-  todayComparison.hasSufficientHistoricalData === true &&
-    todayComparison.previousPeriodNetSales === 104000 &&
-    todayComparison.percentageChange === 83,
-  `Today vs Yesterday comparison is verified: +83% (${todayComparison.currentPeriodNetSales} vs ${todayComparison.previousPeriodNetSales})`
-);
-
-// Verify Last Month (Oct 2026) empty period & no fabricated comparison
-const lastMonthWindow = resolveReportingPeriodWindow(
-  'last_month',
-  undefined,
-  undefined,
-  refDate
-);
-const lastMonthTx = filterTransactionsByWindow(
-  initialTransactions,
-  lastMonthWindow
-);
-const lastMonthMetrics = calculateFinancialMetrics(lastMonthTx, [], feeConfig);
-const lastMonthComparison = calculatePeriodComparison(
-  initialTransactions,
-  lastMonthWindow
+  overviewMetrics.totalOrders === 10,
+  `Overview Total Orders = 10 paid orders (got ${overviewMetrics.totalOrders})`
 );
 assert(
-  lastMonthMetrics.qualifyingOrderCount === 0 &&
-    lastMonthMetrics.netEarnings === 0,
-  'Last Month (Oct 2026) has 0 orders and ₦0 net earnings'
+  overviewMetrics.awaitingRelease === 372350,
+  `Overview Awaiting Release (In Escrow) = ₦372,350 (got ${overviewMetrics.awaitingRelease})`
 );
 assert(
-  lastMonthComparison.hasSufficientHistoricalData === false &&
-    lastMonthComparison.percentageChange === null,
-  'Last Month comparison reports insufficient historical data without fabricating a trend'
-);
-
-// 4. Verify Pending, Failed, Refunded, and Partially Refunded transaction handling
-SalesStorage.saveTransactionMetadataMap({
-  'ord-1024': { status: 'pending' }, // Should be excluded from successful sales
-  'ord-1023': { status: 'failed' }, // Should be excluded from successful sales
-  'ord-1022': { status: 'refunded' }, // Full refund (81,000) -> excluded from net earnings
-  'ord-1021': { status: 'partially_refunded', refundedAmount: 15000 }, // 45,000 - 15,000 = 30,000 net
-});
-
-const modifiedTx = SalesStorage.getTransactions();
-const modifiedMetrics = calculateFinancialMetrics(modifiedTx, [], feeConfig);
-// Qualifying transactions now:
-// - ord-1021 (partially_refunded: gross 45,000, refund 15,000 -> net 30,000)
-// - ord-1019 (successful: net 59,000)
-// - ord-1005 (successful: net 78,000)
-// - ord-0998 (successful: net 35,000)
-// Expected Net Earnings = 30,000 + 59,000 + 78,000 + 35,000 = 202,000
-assert(
-  modifiedMetrics.qualifyingOrderCount === 4,
-  `Pending, Failed, and Fully Refunded transactions excluded from qualifying sales count (got ${modifiedMetrics.qualifyingOrderCount})`
+  overviewMetrics.awaitingSettlement === 120500,
+  `Overview Awaiting Settlement (Processing) = ₦120,500 (got ${overviewMetrics.awaitingSettlement})`
 );
 assert(
-  modifiedMetrics.netEarnings === 202000,
-  `Partially Refunded deducts exact ₦15,000 refund; Net Earnings = ₦202,000 (got ${modifiedMetrics.netEarnings})`
+  overviewMetrics.released === 116000,
+  `Overview Released (Settled) = ₦116,000 (got ${overviewMetrics.released})`
 );
-
-// Reset transaction overrides
-SalesStorage.saveTransactionMetadataMap({});
-
-// 5. Verify Settlement calculations (Pending/Processing vs Paid, no double counting)
-const testSettlements: SettlementRecord[] = [
-  {
-    id: 'set-001',
-    settlementDate: 'Nov 09, 2026',
-    createdAt: '2026-11-09T18:00:00.000Z',
-    periodStartIso: '2026-11-05T00:00:00.000Z',
-    periodEndIso: '2026-11-08T23:59:59.999Z',
-    settlementPeriodLabel: 'Nov 5 – Nov 8, 2026',
-    grossAmount: 117000, // ord-1005 (82k) + ord-0998 (35k)
-    totalDiscounts: 4000,
-    merchantFees: 0,
-    totalDeductions: 4000,
-    netSettlementAmount: 113000, // 78,000 + 35,000
-    status: 'paid',
-    transactionIds: ['ord-1005', 'ord-0998'],
-    payoutReference: 'PYT-20261109-001',
-    activityLog: [],
-  },
-  {
-    id: 'set-002',
-    settlementDate: 'Nov 10, 2026',
-    createdAt: '2026-11-10T17:00:00.000Z',
-    periodStartIso: '2026-11-09T00:00:00.000Z',
-    periodEndIso: '2026-11-09T23:59:59.999Z',
-    settlementPeriodLabel: 'Nov 9, 2026',
-    grossAmount: 107000, // ord-1021 (45k) + ord-1019 (62k)
-    totalDiscounts: 3000,
-    merchantFees: 0,
-    totalDeductions: 3000,
-    netSettlementAmount: 104000,
-    status: 'processing', // Processing must NOT be counted as Total Settled!
-    transactionIds: ['ord-1021', 'ord-1019'],
-    activityLog: [],
-  },
-];
-
-SalesStorage.saveSettlements(testSettlements);
-const txWithSettlements = SalesStorage.getTransactions();
-const settledMetrics = calculateFinancialMetrics(
-  txWithSettlements,
-  filterSettlementsByWindow(testSettlements, last7Window),
-  feeConfig
+assert(
+  overviewMetrics.totalSales === 608850 &&
+    overviewMetrics.awaitingRelease +
+      overviewMetrics.awaitingSettlement +
+      overviewMetrics.released ===
+      overviewMetrics.totalSales,
+  'Overview Total Sales (₦608,850) reconciles 100% with Awaiting Release + Awaiting Settlement + Released with zero double-counting'
 );
 
 assert(
-  settledMetrics.totalSettled === 113000,
-  `Paid settlement (₦113,000) counted in Total Settled while Processing settlement (₦104,000) is excluded (got ${settledMetrics.totalSettled})`
+  settlementMetrics.awaitingRelease === 372350 &&
+    settlementMetrics.processing === 120500 &&
+    settlementMetrics.successfullyPaid === 116000,
+  'Settlements summary cards (Awaiting Release ₦372,350, Processing ₦120,500, Successfully Paid ₦116,000) reconcile 100% with Overview'
 );
+
+// 7. Verify Chart Buckets & Top-Selling Products reconcile with Total Sales
+const buckets = buildSalesChartBuckets(last7Tx, last7Window);
+const bucketSum = buckets.reduce((sum, b) => sum + b.salesAmount, 0);
 assert(
-  settledMetrics.pendingSettlement === 294350,
-  `Pending Settlement = ₦407,350 - ₦113,000 = ₦294,350 with zero double-counting (got ${settledMetrics.pendingSettlement})`
+  bucketSum === overviewMetrics.totalSales,
+  `Sales chart buckets sum (₦${bucketSum}) reconciles 100% with Total Sales (₦${overviewMetrics.totalSales})`
 );
+
+const topProducts = calculateProductPerformance(last7Tx);
+const productSalesSum = topProducts.reduce((sum, p) => sum + p.salesValue, 0);
 assert(
-  settledMetrics.totalSettled + settledMetrics.pendingSettlement ===
-    settledMetrics.netEarnings,
-  'Total Settled + Pending Settlement reconciles 100% with Net Earnings'
+  productSalesSum === overviewMetrics.totalSales,
+  `Top-selling products sales value sum (₦${productSalesSum}) reconciles 100% with Total Sales (₦${overviewMetrics.totalSales})`
 );
 
-// Clean up settlements back to default
-SalesStorage.saveSettlements([]);
-
-// 6. Verify Chart Buckets & Product Performance & CSV Export
-const buckets = buildSalesChartBuckets(
-  SalesStorage.getTransactions(),
-  last7Window
-);
-const bucketNetSum = buckets.reduce((s, b) => s + b.netSales, 0);
-assert(
-  bucketNetSum === 407350,
-  `Chart buckets Net Sales sum (₦${bucketNetSum}) reconciles 100% with Overview Net Earnings (₦407,350)`
-);
-
-const productPerf = calculateProductPerformance(SalesStorage.getTransactions());
-const prodNetSum = productPerf.reduce((s, p) => s + p.netSalesValue, 0);
-assert(
-  prodNetSum === 407350,
-  `Product Performance Net Sales Value sum (₦${prodNetSum}) reconciles 100% with Overview Net Earnings (₦407,350)`
-);
-
-const csvOutput = buildCsvContent(
-  ['Product', 'Net Sales'],
-  productPerf.map((p) => [p.productName, p.netSalesValue])
-);
-assert(
-  csvOutput.includes('"Product","Net Sales"') &&
-    csvOutput.includes('"Classic Sneakers"'),
-  'CSV export builder produces properly quoted headers and rows'
-);
-
-console.log('--- ALL SALES & EARNINGS SCENARIOS VERIFIED SUCCESSFULLY ---');
-
+console.log('--- ALL REVISED SALES & EARNINGS SCENARIOS VERIFIED ---');
