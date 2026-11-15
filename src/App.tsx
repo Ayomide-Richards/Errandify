@@ -10,9 +10,10 @@ import { OverviewView } from './components/dashboard/OverviewView';
 import { OrdersView } from './components/orders/OrdersView';
 import { InventoryView } from './components/inventory/InventoryView';
 import { SalesAndEarningsView } from './components/sales/SalesAndEarningsView';
+import { SettingsView } from './components/settings/SettingsView';
 import { DeleteModal } from './components/products/modals/DeleteModal';
 import { PromotionsPanel } from './components/promotions/PromotionsPanel';
-import { Settings as SettingsIcon, Headphones } from 'lucide-react';
+import { Headphones, Mail, Phone, ShieldCheck } from 'lucide-react';
 
 type ProductSubView = 'list' | 'add' | 'view' | 'edit' | 'promotions';
 
@@ -280,29 +281,54 @@ function ErrandifyApp() {
       {/* Tab 5: Sales & Earnings */}
       {currentTab === 'sales' && <SalesAndEarningsView />}
 
-      {/* Tab 6: Settings Placeholder */}
+      {/* Tab 6: Store Profile & Settings */}
       {currentTab === 'settings' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-3">
-          <div className="w-14 h-14 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
-            <SettingsIcon className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">Store Settings</h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            Configure store profile, business hours, bank account for settlements, and notification preferences.
-          </p>
-        </div>
+        <SettingsView
+          onNavigateToSupport={() => {
+            setCurrentTab('help');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
       )}
 
-      {/* Tab 7: Help Placeholder */}
+      {/* Tab 7: Help & Support */}
       {currentTab === 'help' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-3">
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center space-y-5">
           <div className="w-14 h-14 rounded-full bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center mx-auto">
             <Headphones className="w-7 h-7" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Merchant Help & Support</h2>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            Need assistance with product listings, payouts, or runner delivery? Connect with Errandify Merchant Support.
-          </p>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-slate-900">Merchant Help & Support</h2>
+            <p className="text-sm text-slate-500 max-w-lg mx-auto">
+              Need assistance with product listings, payouts, runner delivery, or verified onboarding changes (CAC registration or settlement bank account updates)? Connect with Errandify Merchant Support.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto pt-2 text-left">
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/70 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#5E17EB] uppercase tracking-wider">
+                <Mail className="w-4 h-4" />
+                Email Support
+              </div>
+              <p className="text-sm font-semibold text-slate-900">merchants@errandify.ng</p>
+              <p className="text-xs text-slate-500">Typical response within 2 business hours.</p>
+            </div>
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/70 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#5E17EB] uppercase tracking-wider">
+                <Phone className="w-4 h-4" />
+                Merchant Desk
+              </div>
+              <p className="text-sm font-semibold text-slate-900">+234 800 ERRANDIFY</p>
+              <p className="text-xs text-slate-500">Mon – Sat, 8:00 AM – 8:00 PM WAT.</p>
+            </div>
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/70 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#5E17EB] uppercase tracking-wider">
+                <ShieldCheck className="w-4 h-4" />
+                Compliance & Payouts
+              </div>
+              <p className="text-sm font-semibold text-slate-900">Verified Account Updates</p>
+              <p className="text-xs text-slate-500">For CAC or settlement bank account changes.</p>
+            </div>
+          </div>
         </div>
       )}
 

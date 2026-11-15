@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutGrid,
   Package,
@@ -10,6 +10,8 @@ import {
   Store as StoreIcon,
   X,
 } from 'lucide-react';
+import { SettingsStorage } from '../../services/settingsStorage';
+import type { MerchantSettings } from '../../types/settings';
 
 interface SidebarProps {
   currentTab: string;
@@ -24,6 +26,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen = false,
   onMobileClose,
 }) => {
+  const [storeProfile, setStoreProfile] = useState<MerchantSettings>(() =>
+    SettingsStorage.getSettings()
+  );
+
+  useEffect(() => {
+    const syncProfile = () => {
+      setStoreProfile(SettingsStorage.getSettings());
+    };
+    window.addEventListener('errandify:settings-updated', syncProfile);
+    window.addEventListener('storage', syncProfile);
+    return () => {
+      window.removeEventListener('errandify:settings-updated', syncProfile);
+      window.removeEventListener('storage', syncProfile);
+    };
+  }, []);
+
   const mainNavItems = [
     { id: 'overview', label: 'Overview', icon: LayoutGrid },
     { id: 'products', label: 'Products', icon: Package },
@@ -128,13 +146,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Store Profile Card */}
       <div className="p-4 border-t border-slate-100">
-        <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors border border-slate-100 cursor-pointer">
-          <div className="w-10 h-10 rounded-xl bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center shrink-0 border border-[#DDD0FA]">
-            <StoreIcon className="w-5 h-5" />
+        <div
+          onClick={() => handleNavClick('settings')}
+          className={`flex items-center gap-3 p-2 rounded-xl transition-colors border cursor-pointer ${
+            currentTab === 'settings'
+              ? 'bg-[#F5F2FE] border-[#DDD0FA]'
+              : 'bg-slate-50/80 hover:bg-slate-100/80 border-slate-100'
+          }`}
+          title="View Store Profile & Settings"
+        >
+          <div className="w-10 h-10 rounded-xl bg-[#F3EFFE] text-[#5E17EB] flex items-center justify-center shrink-0 border border-[#DDD0FA] overflow-hidden">
+            {storeProfile.logoUrl ? (
+              <img
+                src={storeProfile.logoUrl}
+                alt={storeProfile.businessName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <StoreIcon className="w-5 h-5" />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-slate-900 truncate">
-              XYZ limited
+              {storeProfile.businessName}
             </p>
             <p className="text-xs text-slate-500">Store profile</p>
           </div>

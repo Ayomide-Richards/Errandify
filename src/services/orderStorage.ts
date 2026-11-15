@@ -9,6 +9,7 @@ import type {
 import { ProductStorage } from './productStorage';
 import { InventoryStorage } from './inventoryStorage';
 import { PromotionStorage, getPromotionStatus } from './promotionStorage';
+import { SettingsStorage } from './settingsStorage';
 
 const ORDERS_STORAGE_KEY = 'errandify_merchant_orders_v4';
 
@@ -299,12 +300,28 @@ export const OrderStorage = {
     customerName: string;
     paymentConfirmed: boolean;
     notes?: string;
+    referenceDate?: Date;
     items: Array<{
       productId: string;
       combinationId?: string;
       quantity: number;
     }>;
-  }): { created: boolean; order?: Order; error?: string } {
+  }): {
+    created: boolean;
+    order?: Order;
+    error?: string;
+    averagePreparationTime?: string;
+  } {
+    const storefront = SettingsStorage.getCustomerStorefrontStatus(
+      payload.referenceDate
+    );
+    if (!storefront.canPlaceOrders) {
+      return {
+        created: false,
+        error: `Store is currently ${storefront.availability.statusLabel} (${storefront.availability.explanation}) Customers cannot place orders while the store is unavailable.`,
+      };
+    }
+
     if (!payload.paymentConfirmed) {
       return {
         created: false,
@@ -485,8 +502,7 @@ export const OrderStorage = {
           id: `act-${Date.now().toString(36)}`,
           status: 'new_order',
           title: 'New Order',
-          description:
-            'Customer payment confirmed by backend. Order placed in New Order queue awaiting preparation.',
+          description: `Customer payment confirmed by backend. Order placed in New Order queue awaiting preparation (Est. prep time: ${storefront.averagePreparationTime}).`,
           timestamp: nowIso,
           formattedTime: formattedNow,
         },
@@ -496,6 +512,10 @@ export const OrderStorage = {
     const existing = this.getOrders();
     this.saveOrders([newOrder, ...existing]);
 
-    return { created: true, order: newOrder };
+    return {
+      created: true,
+      order: newOrder,
+      averagePreparationTime: storefront.averagePreparationTime,
+    };
   },
 };

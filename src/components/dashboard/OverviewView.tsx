@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import type { Product } from '../../types/product';
 import type { Order, OrderStatus } from '../../types/order';
 import { OrderStorage, STATUS_LABELS } from '../../services/orderStorage';
+import { SettingsStorage } from '../../services/settingsStorage';
+import type { MerchantSettings } from '../../types/settings';
 import { OrderStatusBadge } from '../common/Badge';
 import { useToast } from '../common/Toast';
 import { SalesTrendChart } from './SalesTrendChart';
@@ -20,19 +22,31 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 }) => {
   const toast = useToast();
   const [orders, setOrders] = useState<Order[]>(() => OrderStorage.getOrders());
+  const [settings, setSettings] = useState<MerchantSettings>(() =>
+    SettingsStorage.getSettings()
+  );
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const syncOrders = () => {
       setOrders(OrderStorage.getOrders());
     };
+    const syncSettings = () => {
+      setSettings(SettingsStorage.getSettings());
+    };
     window.addEventListener('errandify:orders-updated', syncOrders);
+    window.addEventListener('errandify:settings-updated', syncSettings);
     window.addEventListener('storage', syncOrders);
+    window.addEventListener('storage', syncSettings);
     return () => {
       window.removeEventListener('errandify:orders-updated', syncOrders);
+      window.removeEventListener('errandify:settings-updated', syncSettings);
       window.removeEventListener('storage', syncOrders);
+      window.removeEventListener('storage', syncSettings);
     };
   }, []);
+
+  const availability = SettingsStorage.evaluateStoreAvailability(settings);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
 
@@ -63,7 +77,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Good morning, XYZ limited 👋
+              Good morning, {settings.businessName} 👋
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -71,12 +85,26 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </p>
         </div>
 
-        {/* Store Open Status Badge */}
-        <div className="self-start sm:self-auto">
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#E8FDF0] text-[#16A34A] border border-[#BBF7D0]/60 shadow-2xs inline-flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
-            Open
-          </span>
+        {/* Store Availability Status Badge */}
+        <div className="self-start sm:self-auto" title={availability.explanation}>
+          {availability.status === 'open' && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#E8FDF0] text-[#16A34A] border border-[#BBF7D0]/60 shadow-2xs inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
+              Open
+            </span>
+          )}
+          {availability.status === 'temporarily_closed' && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 shadow-2xs inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Temporarily Closed
+            </span>
+          )}
+          {availability.status === 'closed' && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200/80 shadow-2xs inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+              Closed
+            </span>
+          )}
         </div>
       </div>
 
