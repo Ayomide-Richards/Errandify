@@ -1,720 +1,980 @@
 import React, { useState } from 'react';
-import type { Promotion, PromotionFormData, PromotionType, PromotionTarget } from '../../types/promotion';
-import type { Product } from '../../types/product';
-import { CATEGORIES } from '../../data/categories';
+import type {
+  AdWalletSystemConfig,
+  SponsoredCampaign,
+} from '../../types/promotion';
+import { formatNaira } from '../../services/productStorage';
+import {
+  AdCampaignStatusBadge,
+  CAMPAIGN_STATUS_LABELS,
+} from '../common/Badge';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import {
-  Percent,
-  BadgeDollarSign,
-  ShoppingCart,
-  Truck,
-  Sparkles,
-  Info,
-  X,
+  ArrowLeft,
   Calendar,
-  Tag,
-  ChevronDown,
-  ChevronUp,
+  CheckCircle2,
+  Clock,
+  CreditCard,
+  Eye,
+  Info,
+  Layers,
+  MousePointerClick,
+  PauseCircle,
+  PlayCircle,
+  ShieldAlert,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
+  TrendingUp,
+  XCircle,
 } from 'lucide-react';
 
-interface PromotionFormProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (data: Omit<Promotion, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  initialPromotion?: Promotion;
-  products: Product[];
-  isEditMode?: boolean;
+interface CampaignDetailsViewProps {
+  campaign: SponsoredCampaign;
+  onBack: () => void;
+  onPause: (campaign: SponsoredCampaign) => void;
+  onResume: (campaign: SponsoredCampaign) => void;
+  onRequestCancel: (campaign: SponsoredCampaign) => void;
+  onSimulateAdminReview?: (
+    campaign: SponsoredCampaign,
+    decision: 'approved' | 'rejected',
+    rejectionReason?: string
+  ) => void;
+  onSimulateActivateScheduled?: (campaign: SponsoredCampaign) => void;
 }
 
-const PROMOTION_TYPES: { value: PromotionType; label: string; description: string; icon: React.ReactNode }[] = [
-  {
-    value: 'percentage_discount',
-    label: 'Percentage Discount',
-    description: 'Offer a % off eligible purchases (e.g. 10% off)',
-    icon: <Percent className="w-4 h-4" />,
-  },
-  {
-    value: 'fixed_discount',
-    label: 'Fixed Amount Discount',
-    description: 'Offer a fixed ₦ off any eligible purchase',
-    icon: <BadgeDollarSign className="w-4 h-4" />,
-  },
-  {
-    value: 'minimum_purchase',
-    label: 'Minimum Purchase Discount',
-    description: 'Give customers a discount when their order hits a minimum spend',
-    icon: <ShoppingCart className="w-4 h-4" />,
-  },
-  {
-    value: 'free_delivery',
-    label: 'Free Delivery',
-    description: 'Offer free delivery, optionally above a minimum order value',
-    icon: <Truck className="w-4 h-4" />,
-  },
-  {
-    value: 'custom',
-    label: 'Custom Promotion',
-    description: 'Configure any other promotion type with a custom benefit description',
-    icon: <Sparkles className="w-4 h-4" />,
-  },
-];
-
-function buildInitialFormData(promo?: Promotion): PromotionFormData {
-  if (!promo) {
-    const now = new Date();
-    const start = new Date(now.getTime() + 60 * 60 * 1000);
-    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const fmt = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return {
-      name: '',
-      description: '',
-      type: 'percentage_discount',
-      discountPercentage: '',
-      discountAmount: '',
-      minimumPurchaseAmount: '',
-      freeDeliveryThreshold: '',
-      customBenefit: '',
-      targetType: 'all_products',
-      applicableProductIds: [],
-      applicableCategories: [],
-      startDate: fmt(start),
-      endDate: fmt(end),
-      isActive: true,
-      allowStackingWithProductDiscounts: false,
-    };
-  }
-  return {
-    name: promo.name,
-    description: promo.description || '',
-    type: promo.type,
-    discountPercentage: promo.discountPercentage?.toString() || '',
-    discountAmount: promo.discountAmount?.toString() || '',
-    minimumPurchaseAmount: promo.minimumPurchaseAmount?.toString() || '',
-    freeDeliveryThreshold: promo.freeDeliveryThreshold?.toString() || '',
-    customBenefit: promo.customBenefit || '',
-    targetType: promo.targetType,
-    applicableProductIds: promo.applicableProductIds || [],
-    applicableCategories: promo.applicableCategories || [],
-    startDate: promo.startDate,
-    endDate: promo.endDate,
-    isActive: promo.isActive,
-    allowStackingWithProductDiscounts: promo.allowStackingWithProductDiscounts,
-  };
-}
-
-export const PromotionForm: React.FC<PromotionFormProps> = ({
-  isOpen,
-  onClose,
-  onSubmit,
-  initialPromotion,
-  products,
-  isEditMode = false,
+export const CampaignDetailsView: React.FC<CampaignDetailsViewProps> = ({
+  campaign,
+  onBack,
+  onPause,
+  onResume,
+  onRequestCancel,
+  onSimulateAdminReview,
+  onSimulateActivateScheduled,
 }) => {
-  const [form, setForm] = useState<PromotionFormData>(() =>
-    buildInitialFormData(initialPromotion)
+  const [chartMode, setChartMode] = useState<'visibility' | 'conversions'>(
+    'visibility'
   );
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [productSearch, setProductSearch] = useState('');
+  const [rejectReasonInput, setRejectReasonInput] = useState(
+    'Product image contains promotional text overlay not permitted by listing standards.'
+  );
+  const [showRejectPrompt, setShowRejectPrompt] = useState(false);
 
-  const setField = <K extends keyof PromotionFormData>(key: K, value: PromotionFormData[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: '' }));
-  };
-
-  const validate = (): boolean => {
-    const newErrors: Record<string, string> = {};
-
-    if (!form.name.trim()) newErrors.name = 'Promotion name is required.';
-
-    if (form.type === 'percentage_discount') {
-      const val = parseFloat(form.discountPercentage);
-      if (!form.discountPercentage || isNaN(val) || val <= 0 || val > 100) {
-        newErrors.discountPercentage = 'Enter a percentage between 1 and 100.';
-      }
-    }
-    if (form.type === 'fixed_discount') {
-      const val = parseFloat(form.discountAmount);
-      if (!form.discountAmount || isNaN(val) || val <= 0) {
-        newErrors.discountAmount = 'Enter a valid fixed discount amount greater than ₦0.';
-      }
-    }
-    if (form.type === 'minimum_purchase') {
-      const amount = parseFloat(form.discountAmount);
-      const min = parseFloat(form.minimumPurchaseAmount);
-      if (!form.discountAmount || isNaN(amount) || amount <= 0) {
-        newErrors.discountAmount = 'Enter a valid discount amount greater than ₦0.';
-      }
-      if (!form.minimumPurchaseAmount || isNaN(min) || min <= 0) {
-        newErrors.minimumPurchaseAmount = 'Enter a valid minimum purchase amount greater than ₦0.';
-      }
-      if (!isNaN(amount) && !isNaN(min) && amount >= min) {
-        newErrors.discountAmount = 'Discount must be less than the minimum purchase amount.';
-      }
-    }
-    if (form.type === 'custom') {
-      if (!form.customBenefit.trim()) {
-        newErrors.customBenefit = 'Please describe the custom benefit.';
-      }
-    }
-
-    if (!form.startDate) newErrors.startDate = 'Start date is required.';
-    if (!form.endDate) newErrors.endDate = 'End date is required.';
-    if (form.startDate && form.endDate && form.endDate <= form.startDate) {
-      newErrors.endDate = 'End date must be after the start date.';
-    }
-
-    if (form.targetType === 'selected_products' && form.applicableProductIds.length === 0) {
-      newErrors.targetType = 'Select at least one product.';
-    }
-    if (form.targetType === 'selected_categories' && form.applicableCategories.length === 0) {
-      newErrors.targetType = 'Select at least one category.';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    setIsSubmitting(true);
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '—';
     try {
-      const payload: Omit<Promotion, 'id' | 'createdAt' | 'updatedAt'> = {
-        name: form.name.trim(),
-        description: form.description.trim() || undefined,
-        type: form.type,
-        targetType: form.targetType,
-        startDate: form.startDate,
-        endDate: form.endDate,
-        isActive: form.isActive,
-        allowStackingWithProductDiscounts: form.allowStackingWithProductDiscounts,
-        applicableProductIds:
-          form.targetType === 'selected_products' ? form.applicableProductIds : undefined,
-        applicableCategories:
-          form.targetType === 'selected_categories' ? form.applicableCategories : undefined,
-      };
-
-      if (form.type === 'percentage_discount') {
-        payload.discountPercentage = parseFloat(form.discountPercentage);
-      }
-      if (form.type === 'fixed_discount') {
-        payload.discountAmount = parseFloat(form.discountAmount);
-      }
-      if (form.type === 'minimum_purchase') {
-        payload.discountAmount = parseFloat(form.discountAmount);
-        payload.minimumPurchaseAmount = parseFloat(form.minimumPurchaseAmount);
-      }
-      if (form.type === 'free_delivery') {
-        payload.freeDeliveryThreshold = form.freeDeliveryThreshold
-          ? parseFloat(form.freeDeliveryThreshold)
-          : 0;
-      }
-      if (form.type === 'custom') {
-        payload.customBenefit = form.customBenefit.trim();
-      }
-
-      onSubmit(payload);
-    } finally {
-      setIsSubmitting(false);
+      return new Date(dateStr).toLocaleDateString('en-NG', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch {
+      return dateStr;
     }
   };
 
-  const handleClose = () => {
-    setForm(buildInitialFormData(initialPromotion));
-    setErrors({});
-    setIsSubmitting(false);
-    setProductSearch('');
-    onClose();
+  const fundsStateLabels: Record<SponsoredCampaign['fundsState'], string> = {
+    none: 'No funds held (Draft)',
+    held: 'Held in Ad Wallet (Awaiting Review / Start)',
+    charged: 'Charged from Ad Wallet',
+    released: 'Hold Released back to Ad Wallet',
+    refunded: 'Refunded to Ad Wallet',
   };
 
-  const toggleProductId = (id: string) => {
-    setField(
-      'applicableProductIds',
-      form.applicableProductIds.includes(id)
-        ? form.applicableProductIds.filter((x) => x !== id)
-        : [...form.applicableProductIds, id]
-    );
-    if (errors.targetType) setErrors((prev) => ({ ...prev, targetType: '' }));
-  };
-
-  const toggleCategory = (cat: string) => {
-    setField(
-      'applicableCategories',
-      form.applicableCategories.includes(cat)
-        ? form.applicableCategories.filter((x) => x !== cat)
-        : [...form.applicableCategories, cat]
-    );
-    if (errors.targetType) setErrors((prev) => ({ ...prev, targetType: '' }));
-  };
-
-  const filteredProducts = products.filter((p) =>
-    p.name.toLowerCase().includes(productSearch.toLowerCase())
+  const perf = campaign.performance;
+  const maxImpressions = Math.max(
+    1,
+    ...perf.dailyMetrics.map((d) => d.impressions)
   );
-
-  const inputClass = (hasError?: boolean) =>
-    `w-full px-3.5 py-2.5 border rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB] transition-colors ${
-      hasError ? 'border-red-400 bg-red-50/40' : 'border-slate-200 bg-white'
-    }`;
+  const maxConversions = Math.max(
+    1,
+    ...perf.dailyMetrics.map((d) => Math.max(d.addToCarts, d.orders))
+  );
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} maxWidth="2xl" showCloseButton={false}>
-      {/* Custom header */}
-      <div className="flex items-start justify-between mb-6 -mt-2">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg bg-[#F3EFFE] flex items-center justify-center">
-              <Tag className="w-4 h-4 text-[#5E17EB]" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">
-              {isEditMode ? 'Edit Promotion' : 'Create Promotion'}
+    <div className="space-y-6">
+      {/* Top Breadcrumb & Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5E17EB] hover:text-[#4E12C6] transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to My Campaigns
+          </button>
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+              {campaign.productName}
             </h2>
+            <AdCampaignStatusBadge status={campaign.status} />
+            {campaign.isTestFixture && (
+              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                Test Fixture
+              </span>
+            )}
           </div>
-          <p className="text-sm text-slate-500 ml-10">
-            {isEditMode
-              ? 'Update the details of this promotion.'
-              : 'Set up a new promotion for your store customers.'}
+          <p className="text-xs text-slate-500">
+            Campaign ID: <span className="font-mono font-medium text-slate-700">{campaign.id}</span>
+            {campaign.submittedAt && (
+              <>
+                {' '}
+                · Submitted {formatDate(campaign.submittedAt)}
+              </>
+            )}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleClose}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
+
+        {/* Permitted Merchant Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {campaign.permissions.canPause && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPause(campaign)}
+              leftIcon={<PauseCircle className="w-4 h-4 text-amber-600" />}
+            >
+              Pause Campaign
+            </Button>
+          )}
+
+          {campaign.status === 'paused' && (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!campaign.permissions.canResume}
+              onClick={() => onResume(campaign)}
+              leftIcon={<PlayCircle className="w-4 h-4" />}
+              title={campaign.permissions.resumeDisabledReason}
+            >
+              Resume Campaign
+            </Button>
+          )}
+
+          {campaign.permissions.canCancel && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => onRequestCancel(campaign)}
+              leftIcon={<XCircle className="w-4 h-4" />}
+            >
+              Cancel Campaign
+            </Button>
+          )}
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5 max-h-[72vh] overflow-y-auto pr-1 -mr-1">
-        {/* Promotion Name */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-            Promotion Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={form.name}
-            onChange={(e) => setField('name', e.target.value)}
-            placeholder="e.g. Weekend 10% Off Flash Sale"
-            className={inputClass(!!errors.name)}
-            maxLength={80}
-          />
-          {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-            Description <span className="text-slate-400 font-normal">(optional)</span>
-          </label>
-          <textarea
-            value={form.description}
-            onChange={(e) => setField('description', e.target.value)}
-            placeholder="Briefly describe this promotion for your records..."
-            rows={2}
-            className={`${inputClass()} resize-none`}
-            maxLength={300}
-          />
-        </div>
-
-        {/* Promotion Type */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-2">
-            Promotion Type <span className="text-red-500">*</span>
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {PROMOTION_TYPES.map((pt) => (
-              <button
-                key={pt.value}
-                type="button"
-                onClick={() => setField('type', pt.value)}
-                className={`text-left px-3.5 py-3 rounded-xl border transition-all ${
-                  form.type === pt.value
-                    ? 'border-[#5E17EB] bg-[#F3EFFE] shadow-sm ring-1 ring-[#5E17EB]/20'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span
-                    className={`${
-                      form.type === pt.value ? 'text-[#5E17EB]' : 'text-slate-500'
-                    }`}
-                  >
-                    {pt.icon}
-                  </span>
-                  <span
-                    className={`text-xs font-semibold ${
-                      form.type === pt.value ? 'text-[#5E17EB]' : 'text-slate-800'
-                    }`}
-                  >
-                    {pt.label}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 ml-6 leading-snug">{pt.description}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Conditional Fields based on type */}
-        {form.type === 'percentage_discount' && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Discount Percentage <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                min="1"
-                max="100"
-                step="0.5"
-                value={form.discountPercentage}
-                onChange={(e) => setField('discountPercentage', e.target.value)}
-                placeholder="10"
-                className={`${inputClass(!!errors.discountPercentage)} pr-8`}
-              />
-              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">
-                %
-              </span>
-            </div>
-            {errors.discountPercentage && (
-              <p className="mt-1 text-xs text-red-600">{errors.discountPercentage}</p>
-            )}
-            <p className="mt-1 text-xs text-slate-400">
-              Customers receive this percentage off their qualifying order.
+      {/* Review Outcome / Rejection Banner */}
+      {campaign.status === 'rejected' && campaign.reviewOutcome && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-start gap-3.5">
+          <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="space-y-1 text-sm">
+            <p className="font-bold text-red-900">
+              Campaign Did Not Pass Review — Held Funds Released
             </p>
-          </div>
-        )}
-
-        {form.type === 'fixed_discount' && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Fixed Discount Amount (₦) <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">
-                ₦
-              </span>
-              <input
-                type="number"
-                min="1"
-                value={form.discountAmount}
-                onChange={(e) => setField('discountAmount', e.target.value)}
-                placeholder="2000"
-                className={`${inputClass(!!errors.discountAmount)} pl-8`}
-              />
-            </div>
-            {errors.discountAmount && (
-              <p className="mt-1 text-xs text-red-600">{errors.discountAmount}</p>
+            <p className="text-red-800 text-xs leading-relaxed">
+              <span className="font-semibold">Rejection Reason:</span>{' '}
+              {campaign.reviewOutcome.rejectionReason}
+            </p>
+            {campaign.reviewOutcome.adminNote && (
+              <p className="text-red-700 text-xs leading-relaxed">
+                <span className="font-semibold">Administrator Note:</span>{' '}
+                {campaign.reviewOutcome.adminNote}
+              </p>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-        {form.type === 'minimum_purchase' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Minimum Purchase Amount (₦) <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">
-                  ₦
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={form.minimumPurchaseAmount}
-                  onChange={(e) => setField('minimumPurchaseAmount', e.target.value)}
-                  placeholder="20000"
-                  className={`${inputClass(!!errors.minimumPurchaseAmount)} pl-8`}
-                />
-              </div>
-              {errors.minimumPurchaseAmount && (
-                <p className="mt-1 text-xs text-red-600">{errors.minimumPurchaseAmount}</p>
+      {/* Paused Status Explanation */}
+      {campaign.status === 'paused' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+          <PauseCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-900 space-y-1">
+            <p className="font-bold">Campaign is Currently Paused</p>
+            <p>
+              {campaign.pauseReason ||
+                'Your sponsored product is temporarily paused and not serving impressions.'}
+            </p>
+            {!campaign.permissions.canResume &&
+              campaign.permissions.resumeDisabledReason && (
+                <p className="font-semibold text-red-700">
+                  {campaign.permissions.resumeDisabledReason}
+                </p>
               )}
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Discount Amount (₦) <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">
-                  ₦
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={form.discountAmount}
-                  onChange={(e) => setField('discountAmount', e.target.value)}
-                  placeholder="3000"
-                  className={`${inputClass(!!errors.discountAmount)} pl-8`}
-                />
+          </div>
+        </div>
+      )}
+
+      {/* Sandbox / Backend Review Event Trigger for Pending Review or Scheduled campaigns */}
+      {(campaign.status === 'pending_review' ||
+        campaign.status === 'scheduled') &&
+        (onSimulateAdminReview || onSimulateActivateScheduled) && (
+          <div className="bg-[#F8F6FE] border border-[#DDD0FA] rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-[#5E17EB] uppercase tracking-wider">
+                  Backend Review & Scheduling Event Simulator (Test Helper)
+                </p>
+                <p className="text-xs text-slate-600">
+                  Because the Errandify Admin Console is separate from the merchant dashboard, you can simulate the backend review webhook for this campaign here to verify wallet hold charging or release.
+                </p>
               </div>
-              {errors.discountAmount && (
-                <p className="mt-1 text-xs text-red-600">{errors.discountAmount}</p>
-              )}
-            </div>
-            <p className="text-xs text-slate-400 sm:col-span-2">
-              Example: Get ₦3,000 off orders worth ₦20,000 or more.
-            </p>
-          </div>
-        )}
 
-        {form.type === 'free_delivery' && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Minimum Order Value for Free Delivery (₦){' '}
-              <span className="text-slate-400 font-normal">(leave empty for unconditional)</span>
-            </label>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">
-                ₦
-              </span>
-              <input
-                type="number"
-                min="0"
-                value={form.freeDeliveryThreshold}
-                onChange={(e) => setField('freeDeliveryThreshold', e.target.value)}
-                placeholder="15000 (or leave empty for all orders)"
-                className={`${inputClass()} pl-8`}
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-400">
-              Leave empty to offer free delivery on all qualifying orders with no minimum.
-            </p>
-          </div>
-        )}
-
-        {form.type === 'custom' && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Custom Benefit Description <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={form.customBenefit}
-              onChange={(e) => setField('customBenefit', e.target.value)}
-              placeholder="e.g. Buy 3 get 1 free on selected items"
-              className={inputClass(!!errors.customBenefit)}
-              maxLength={120}
-            />
-            {errors.customBenefit && (
-              <p className="mt-1 text-xs text-red-600">{errors.customBenefit}</p>
-            )}
-          </div>
-        )}
-
-        {/* Target Scope */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-2">
-            Applies To
-          </label>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {(
-              [
-                { value: 'all_products', label: 'All products' },
-                { value: 'selected_categories', label: 'Selected categories' },
-                { value: 'selected_products', label: 'Specific products' },
-              ] as { value: PromotionTarget; label: string }[]
-            ).map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => {
-                  setField('targetType', opt.value);
-                  if (errors.targetType) setErrors((prev) => ({ ...prev, targetType: '' }));
-                }}
-                className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
-                  form.targetType === opt.value
-                    ? 'border-[#5E17EB] bg-[#F3EFFE] text-[#5E17EB]'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Category multi-select */}
-          {form.targetType === 'selected_categories' && (
-            <div className="border border-slate-200 rounded-xl p-3 max-h-44 overflow-y-auto space-y-1 bg-slate-50/40">
-              {CATEGORIES.map((cat) => (
-                <label
-                  key={cat.id}
-                  className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.applicableCategories.includes(cat.name)}
-                    onChange={() => toggleCategory(cat.name)}
-                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#5E17EB] focus:ring-[#5E17EB]/20 accent-[#5E17EB]"
-                  />
-                  <span className="text-xs font-medium text-slate-800">{cat.name}</span>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* Product multi-select */}
-          {form.targetType === 'selected_products' && (
-            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/40">
-              <div className="p-2 border-b border-slate-200 bg-white">
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto p-2 space-y-0.5">
-                {filteredProducts.map((p) => (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.applicableProductIds.includes(p.id)}
-                      onChange={() => toggleProductId(p.id)}
-                      className="w-3.5 h-3.5 rounded border-slate-300 text-[#5E17EB] focus:ring-[#5E17EB]/20 accent-[#5E17EB]"
-                    />
-                    <span className="text-xs font-medium text-slate-800 truncate">{p.name}</span>
-                    <span className="text-[11px] text-slate-400 ml-auto shrink-0">{p.category}</span>
-                  </label>
-                ))}
-                {filteredProducts.length === 0 && (
-                  <p className="text-xs text-slate-400 text-center py-3">No products found.</p>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {campaign.status === 'pending_review' && onSimulateAdminReview && (
+                  <>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() =>
+                        onSimulateAdminReview(campaign, 'approved')
+                      }
+                      leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                    >
+                      Simulate Admin Approval
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowRejectPrompt((v) => !v)}
+                      leftIcon={<XCircle className="w-3.5 h-3.5 text-red-600" />}
+                    >
+                      Simulate Rejection
+                    </Button>
+                  </>
                 )}
+
+                {campaign.status === 'scheduled' &&
+                  onSimulateActivateScheduled && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => onSimulateActivateScheduled(campaign)}
+                      leftIcon={<PlayCircle className="w-3.5 h-3.5" />}
+                    >
+                      Simulate Scheduled Start (Go Live & Charge Hold)
+                    </Button>
+                  )}
               </div>
             </div>
-          )}
 
-          {errors.targetType && (
-            <p className="mt-1.5 text-xs text-red-600">{errors.targetType}</p>
-          )}
+            {showRejectPrompt &&
+              campaign.status === 'pending_review' &&
+              onSimulateAdminReview && (
+                <div className="pt-2 border-t border-[#DDD0FA] flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={rejectReasonInput}
+                    onChange={(e) => setRejectReasonInput(e.target.value)}
+                    placeholder="Enter admin rejection reason..."
+                    className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#5E17EB]"
+                  />
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      onSimulateAdminReview(
+                        campaign,
+                        'rejected',
+                        rejectReasonInput
+                      );
+                      setShowRejectPrompt(false);
+                    }}
+                  >
+                    Confirm Rejection & Release Hold
+                  </Button>
+                </div>
+              )}
+          </div>
+        )}
+
+      {/* Campaign Information Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Left: Promoted Product Card */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
+          <h3 className="text-sm font-bold text-slate-900">Promoted Product</h3>
+          <div className="flex items-center gap-3.5">
+            <img
+              src={campaign.productImage}
+              alt={campaign.productName}
+              className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0 bg-slate-50"
+            />
+            <div className="min-w-0">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#F3EFFE] text-[#5E17EB] mb-1">
+                Sponsored
+              </span>
+              <p className="text-sm font-bold text-slate-900 truncate">
+                {campaign.productName}
+              </p>
+              <p className="text-xs text-slate-500">
+                {campaign.productCategory}
+              </p>
+              <p className="text-sm font-extrabold text-slate-900 mt-1">
+                {formatNaira(campaign.productSellingPrice)}
+              </p>
+            </div>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-600 leading-relaxed">
+            Shoppers see this approved product listing with a{' '}
+            <span className="font-semibold text-slate-800">Sponsored</span>{' '}
+            label. Your merchant identity, shop number, and market location remain hidden from shoppers.
+          </div>
         </div>
 
-        {/* Dates */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              <Calendar className="w-3 h-3 inline mr-1" />
-              Start Date & Time <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="datetime-local"
-              value={form.startDate}
-              onChange={(e) => setField('startDate', e.target.value)}
-              className={inputClass(!!errors.startDate)}
-            />
-            {errors.startDate && (
-              <p className="mt-1 text-xs text-red-600">{errors.startDate}</p>
-            )}
+        {/* Middle & Right: Campaign Details Metadata */}
+        <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
+          <h3 className="text-sm font-bold text-slate-900">
+            Campaign Summary & Financial Status
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">Placement</p>
+              <p className="font-bold text-slate-900 text-sm mt-1">
+                {campaign.placementName}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">Package & Duration</p>
+              <p className="font-bold text-slate-900 text-sm mt-1">
+                {campaign.durationDays} Days
+              </p>
+              <p className="text-[11px] text-slate-500 truncate">
+                {campaign.packageName}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">Package Price</p>
+              <p className="font-extrabold text-[#5E17EB] text-sm mt-1">
+                {formatNaira(campaign.price)}
+              </p>
+              <p className="text-[11px] text-slate-500">Fixed-price package</p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">Start Date</p>
+              <p className="font-bold text-slate-900 mt-1">
+                {formatDate(campaign.startDate)}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {campaign.startMode === 'immediate'
+                  ? 'Immediate upon approval'
+                  : 'Scheduled future start'}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">End Date</p>
+              <p className="font-bold text-slate-900 mt-1">
+                {formatDate(campaign.endDate)}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {campaign.durationDays}-day run
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+              <p className="text-slate-500">Wallet Funds State</p>
+              <p className="font-bold text-slate-900 mt-1">
+                {fundsStateLabels[campaign.fundsState]}
+              </p>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              <Calendar className="w-3 h-3 inline mr-1" />
-              End Date & Time <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="datetime-local"
-              value={form.endDate}
-              onChange={(e) => setField('endDate', e.target.value)}
-              className={inputClass(!!errors.endDate)}
-            />
-            {errors.endDate && (
-              <p className="mt-1 text-xs text-red-600">{errors.endDate}</p>
-            )}
-          </div>
-        </div>
 
-        {/* Status toggle */}
-        <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+          {campaign.reviewOutcome && campaign.status !== 'rejected' && (
+            <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-3.5 py-2.5 rounded-xl">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>
+                Reviewed and approved on{' '}
+                {formatDate(campaign.reviewOutcome.reviewedAt)}.{' '}
+                {campaign.reviewOutcome.adminNote}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Campaign Performance Section (Section 5) */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <p className="text-xs font-semibold text-slate-800">Promotion Status</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {form.isActive ? 'Active — promotion will run on schedule.' : 'Inactive — promotion is paused.'}
+            <h3 className="text-base font-bold text-slate-900">
+              Campaign Performance
+            </h3>
+            <p className="text-xs text-slate-500">
+              Daily aggregated performance metrics from ErrandMarket shopper activity.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setField('isActive', !form.isActive)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              form.isActive ? 'bg-[#5E17EB]' : 'bg-slate-300'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                form.isActive ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Advanced section */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
-          >
-            {showAdvanced ? (
-              <ChevronUp className="w-3.5 h-3.5" />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" />
-            )}
-            Advanced settings
-          </button>
-
-          {showAdvanced && (
-            <div className="mt-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-              <label className="flex items-start gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.allowStackingWithProductDiscounts}
-                  onChange={(e) =>
-                    setField('allowStackingWithProductDiscounts', e.target.checked)
-                  }
-                  className="w-3.5 h-3.5 mt-0.5 rounded border-slate-300 text-[#5E17EB] focus:ring-[#5E17EB]/20 accent-[#5E17EB]"
-                />
-                <div>
-                  <p className="text-xs font-semibold text-slate-800">
-                    Allow stacking with product-level discounts
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                    When enabled, this promotion applies on top of any existing product discount prices. Leave unchecked to prevent double discounting.
-                  </p>
-                </div>
-              </label>
-              <div className="flex items-start gap-2 pt-1 text-[11px] text-slate-400">
-                <Info className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>Stacking behaviour must be confirmed with your backend payment configuration before going live.</span>
-              </div>
-            </div>
+          {perf.lastAggregatedAt && (
+            <span className="text-[11px] text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+              Daily aggregation · Last updated {formatDate(perf.lastAggregatedAt)}
+            </span>
           )}
         </div>
 
-        {/* Footer actions */}
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
-          <Button type="button" variant="outline" onClick={handleClose}>
-            Cancel
+        {/* 7 Documented Headline Metrics */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <Eye className="w-3.5 h-3.5 text-[#5E17EB]" />
+              Impressions
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData ? perf.impressions.toLocaleString() : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Times shown to shoppers
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <MousePointerClick className="w-3.5 h-3.5 text-[#5E17EB]" />
+              Taps
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData ? perf.taps.toLocaleString() : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Product opens from ad
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <TrendingUp className="w-3.5 h-3.5 text-[#5E17EB]" />
+              Tap Rate
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData ? `${perf.tapRate}%` : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Taps ÷ Impressions
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <ShoppingCart className="w-3.5 h-3.5 text-[#5E17EB]" />
+              Add-to-Carts
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData ? perf.addToCarts.toLocaleString() : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Cart additions after tap
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <ShoppingBag className="w-3.5 h-3.5 text-[#5E17EB]" />
+              Orders
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData ? perf.orders.toLocaleString() : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Attributed paid orders
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <Layers className="w-3.5 h-3.5 text-emerald-600" />
+              Order Value
+            </div>
+            <p className="text-lg font-extrabold text-emerald-700 mt-1.5">
+              {perf.hasData ? formatNaira(perf.orderValue) : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Sales from ad orders
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/60">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+              <Clock className="w-3.5 h-3.5 text-slate-600" />
+              Cost per Order
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 mt-1.5">
+              {perf.hasData && perf.costPerOrder !== null
+                ? formatNaira(perf.costPerOrder)
+                : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Package Cost ÷ Orders
+            </p>
+          </div>
+        </div>
+
+        {/* Daily Aggregated Chart or Honest Unavailable State */}
+        {!perf.hasData || perf.dailyMetrics.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-8 text-center space-y-2">
+            <Info className="w-6 h-6 text-slate-400 mx-auto" />
+            <p className="text-sm font-bold text-slate-800">
+              Daily Performance Data Not Yet Available
+            </p>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              {perf.unavailableReason ||
+                'Performance metrics are aggregated once per day after a campaign is approved and begins serving impressions.'}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Daily Activity Breakdown ({perf.dailyMetrics.length} Days Recorded)
+              </p>
+              <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setChartMode('visibility')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+                    chartMode === 'visibility'
+                      ? 'bg-white text-[#5E17EB] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Impressions & Taps
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartMode('conversions')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+                    chartMode === 'conversions'
+                      ? 'bg-white text-[#5E17EB] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Add-to-Carts & Orders
+                </button>
+              </div>
+            </div>
+
+            {/* Bar Chart */}
+            <div className="border border-slate-200/80 rounded-2xl p-4 bg-slate-50/40">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end min-h-[160px] pt-4">
+                {perf.dailyMetrics.map((day) => {
+                  const primaryVal =
+                    chartMode === 'visibility'
+                      ? day.impressions
+                      : day.addToCarts;
+                  const secondaryVal =
+                    chartMode === 'visibility' ? day.taps : day.orders;
+                  const maxRef =
+                    chartMode === 'visibility'
+                      ? maxImpressions
+                      : maxConversions;
+
+                  const primaryHeight = Math.max(
+                    12,
+                    Math.round((primaryVal / maxRef) * 110)
+                  );
+                  const secondaryHeight = Math.max(
+                    8,
+                    Math.round((secondaryVal / maxRef) * 110)
+                  );
+
+                  return (
+                    <div
+                      key={day.date}
+                      className="flex flex-col items-center gap-2 bg-white border border-slate-100 rounded-xl p-3 shadow-2xs"
+                    >
+                      <div className="flex items-end gap-2 h-28">
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] font-bold text-[#5E17EB] mb-1">
+                            {primaryVal}
+                          </span>
+                          <div
+                            style={{ height: `${primaryHeight}px` }}
+                            className="w-5 rounded-t-md bg-[#5E17EB]"
+                            title={
+                              chartMode === 'visibility'
+                                ? `${day.impressions} Impressions`
+                                : `${day.addToCarts} Add-to-Carts`
+                            }
+                          />
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] font-bold text-emerald-700 mb-1">
+                            {secondaryVal}
+                          </span>
+                          <div
+                            style={{ height: `${secondaryHeight}px` }}
+                            className="w-5 rounded-t-md bg-emerald-500"
+                            title={
+                              chartMode === 'visibility'
+                                ? `${day.taps} Taps`
+                                : `${day.orders} Orders`
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="text-center border-t border-slate-100 w-full pt-1.5">
+                        <p className="text-xs font-bold text-slate-800">
+                          {day.label}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {formatNaira(day.orderValue)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-center gap-6 pt-3 mt-3 border-t border-slate-200/60 text-xs text-slate-600">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-xs bg-[#5E17EB]" />
+                  {chartMode === 'visibility' ? 'Impressions' : 'Add-to-Carts'}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
+                  {chartMode === 'visibility' ? 'Taps' : 'Orders'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+interface CancelCampaignModalProps {
+  campaign: SponsoredCampaign | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirmCancel: (campaign: SponsoredCampaign) => void;
+}
+
+export const CancelCampaignModal: React.FC<CancelCampaignModalProps> = ({
+  campaign,
+  isOpen,
+  onClose,
+  onConfirmCancel,
+}) => {
+  if (!campaign) return null;
+
+  const isPreStartHold =
+    (campaign.status === 'pending_review' ||
+      campaign.status === 'scheduled') &&
+    campaign.fundsState === 'held';
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} maxWidth="md" title="Cancel Advertising Campaign?">
+      <div className="space-y-4">
+        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
+          <img
+            src={campaign.productImage}
+            alt={campaign.productName}
+            className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-900 truncate">
+              {campaign.productName}
+            </p>
+            <p className="text-xs text-slate-500">
+              {campaign.placementName} · {campaign.packageName} (
+              {formatNaira(campaign.price)})
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Current Status:{' '}
+              <span className="font-semibold text-slate-800">
+                {CAMPAIGN_STATUS_LABELS[campaign.status]}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div
+          className={`p-4 rounded-xl border text-xs leading-relaxed space-y-1.5 ${
+            isPreStartHold
+              ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+              : 'bg-amber-50/70 border-amber-200 text-amber-900'
+          }`}
+        >
+          <p className="font-bold">
+            {isPreStartHold
+              ? 'Pre-Start Cancellation — Full Hold Release'
+              : 'Cancellation & Refund Policy Notice'}
+          </p>
+          <p>{campaign.permissions.cancellationPolicyNote}</p>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <Button variant="outline" onClick={onClose}>
+            Keep Campaign
           </Button>
           <Button
-            type="submit"
-            variant="primary"
-            isLoading={isSubmitting}
-            leftIcon={<Tag className="w-4 h-4" />}
+            variant="danger"
+            onClick={() => onConfirmCancel(campaign)}
+            leftIcon={<XCircle className="w-4 h-4" />}
           >
-            {isEditMode ? 'Save Changes' : 'Create Promotion'}
+            Confirm Cancellation
           </Button>
         </div>
-      </form>
+      </div>
     </Modal>
   );
 };
 
+interface AdWalletTopUpModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  walletConfig: AdWalletSystemConfig;
+  merchantEmail: string;
+  onCompleteVerifiedTopUp: (params: {
+    amount: number;
+    reference: string;
+    paymentOutcome: 'success' | 'failed';
+  }) => void;
+}
+
+export const AdWalletTopUpModal: React.FC<AdWalletTopUpModalProps> = ({
+  isOpen,
+  onClose,
+  walletConfig,
+  merchantEmail,
+  onCompleteVerifiedTopUp,
+}) => {
+  const [step, setStep] = useState<'enter' | 'review' | 'paystack'>('enter');
+  const [amountInput, setAmountInput] = useState<string>('15000');
+  const [reference, setReference] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+
+  const numericAmount = Number(amountInput.replace(/,/g, ''));
+
+  const handleResetAndClose = () => {
+    setStep('enter');
+    setError(null);
+    onClose();
+  };
+
+  const handleProceedToReview = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setError('Please enter a valid top-up amount greater than ₦0.');
+      return;
+    }
+
+    if (
+      walletConfig.minimumTopUpAmount !== null &&
+      numericAmount < walletConfig.minimumTopUpAmount
+    ) {
+      setError(
+        `Minimum top-up amount configured by the system is ${formatNaira(
+          walletConfig.minimumTopUpAmount
+        )}.`
+      );
+      return;
+    }
+
+    const generatedRef = `PSK-AD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    setReference(generatedRef);
+    setStep('review');
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={handleResetAndClose}
+      maxWidth="md"
+      title="Top Up Ad Wallet via Paystack"
+    >
+      {step === 'enter' && (
+        <form onSubmit={handleProceedToReview} className="space-y-4">
+          <div className="p-3.5 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA] text-xs text-slate-700 leading-relaxed">
+            Your Ad Wallet is a prepaid balance used exclusively for ErrandMarket advertising packages. Ad Wallet funds cannot be withdrawn or transferred to Sales & Earnings.
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Top-Up Amount (₦)
+            </label>
+            <input
+              type="number"
+              min={walletConfig.minimumTopUpAmount ?? 1}
+              step="any"
+              value={amountInput}
+              onChange={(e) => {
+                setAmountInput(e.target.value);
+                setError(null);
+              }}
+              placeholder="Enter amount in Naira"
+              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#5E17EB]/20 focus:border-[#5E17EB]"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              {walletConfig.minimumTopUpAmount !== null
+                ? `Configured minimum top-up: ${formatNaira(walletConfig.minimumTopUpAmount)}`
+                : 'No minimum top-up amount is currently enforced by platform configuration.'}
+            </p>
+          </div>
+
+          {/* Quick suggested amounts */}
+          <div className="flex flex-wrap gap-2">
+            {[5000, 10000, 25000, 50000].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => {
+                  setAmountInput(String(preset));
+                  setError(null);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  numericAmount === preset
+                    ? 'bg-[#F3EFFE] text-[#5E17EB] border-[#5E17EB]'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {formatNaira(preset)}
+              </button>
+            ))}
+          </div>
+
+          {error && (
+            <p className="text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+              {error}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleResetAndClose}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary">
+              Review Top-Up Amount
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {step === 'review' && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Top-Up Amount</span>
+              <span className="text-base font-extrabold text-slate-900">
+                {formatNaira(numericAmount)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Payment Gateway</span>
+              <span className="font-semibold text-slate-800">
+                Paystack (Card / Bank Transfer / USSD)
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Merchant Email</span>
+              <span className="font-medium text-slate-700">
+                {merchantEmail}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Payment Reference</span>
+              <span className="font-mono font-medium text-slate-700">
+                {reference}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-900 leading-relaxed flex items-start gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Server-Side Verification Policy</p>
+              <p>
+                Your Ad Wallet balance is updated only after Paystack payment verification is confirmed by the backend server/webhook. Client-side redirects alone do not credit the wallet.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setStep('enter')}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => setStep('paystack')}
+              leftIcon={<CreditCard className="w-4 h-4" />}
+            >
+              Continue to Paystack
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === 'paystack' && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#5E17EB]" />
+                <span className="text-xs font-bold text-slate-900">
+                  Paystack Checkout & Backend Verification
+                </span>
+              </div>
+              <span className="text-xs font-extrabold text-[#5E17EB]">
+                {formatNaira(numericAmount)}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {walletConfig.paystackConfigured
+                ? 'Complete your payment in Paystack. The backend webhook will verify reference '
+                : 'Live Paystack public key / backend webhook endpoint is not configured in this local environment. Use the backend verification controls below to test a server-verified Paystack success or payment failure for reference '}
+              <span className="font-mono font-semibold text-slate-800">
+                {reference}
+              </span>
+              .
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                onCompleteVerifiedTopUp({
+                  amount: numericAmount,
+                  reference,
+                  paymentOutcome: 'success',
+                });
+                handleResetAndClose();
+              }}
+              leftIcon={<CheckCircle2 className="w-4 h-4" />}
+            >
+              Confirm Server-Verified Payment
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onCompleteVerifiedTopUp({
+                  amount: numericAmount,
+                  reference,
+                  paymentOutcome: 'failed',
+                });
+                handleResetAndClose();
+              }}
+              leftIcon={<XCircle className="w-4 h-4 text-red-600" />}
+            >
+              Simulate Payment Failure
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};

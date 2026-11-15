@@ -5,6 +5,7 @@ import {
   Store,
   ShoppingCart,
   Wallet,
+  Megaphone,
   Settings,
   Headphones,
   Store as StoreIcon,
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'products', label: 'Products', icon: Package },
     { id: 'inventory', label: 'Inventory', icon: Store },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
+    { id: 'promotions', label: 'Promotions', icon: Megaphone },
     { id: 'sales', label: 'Sales & Earnings', icon: Wallet },
   ];
 

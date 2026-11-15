@@ -15,7 +15,7 @@ import { DeleteModal } from './components/products/modals/DeleteModal';
 import { PromotionsPanel } from './components/promotions/PromotionsPanel';
 import { Headphones, Mail, Phone, ShieldCheck } from 'lucide-react';
 
-type ProductSubView = 'list' | 'add' | 'view' | 'edit' | 'promotions';
+type ProductSubView = 'list' | 'add' | 'view' | 'edit';
 
 function ErrandifyApp() {
   const toast = useToast();
@@ -222,15 +222,10 @@ function ErrandifyApp() {
               onBulkPublish={handleBulkPublish}
               onDeleteProduct={handleDelete}
               onBulkDelete={handleBulkDelete}
-              onOpenPromotions={() => setProductSubView('promotions')}
-            />
-          )}
-
-          {productSubView === 'promotions' && (
-            <PromotionsPanel
-              products={products}
-              onBack={() => setProductSubView('list')}
-              onToast={handleToastFromPanel}
+              onOpenPromotions={() => {
+                setCurrentTab('promotions');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
             />
           )}
 
@@ -278,7 +273,12 @@ function ErrandifyApp() {
       {/* Tab 4: Orders */}
       {currentTab === 'orders' && <OrdersView onStockUpdated={refreshProducts} />}
 
-      {/* Tab 5: Sales & Earnings */}
+      {/* Tab 5: Promotions & Advertising */}
+      {currentTab === 'promotions' && (
+        <PromotionsPanel products={products} onToast={handleToastFromPanel} />
+      )}
+
+      {/* Tab 6: Sales & Earnings */}
       {currentTab === 'sales' && <SalesAndEarningsView />}
 
       {/* Tab 6: Store Profile & Settings */}

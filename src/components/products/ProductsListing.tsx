@@ -209,10 +209,10 @@ export const ProductsListing: React.FC<ProductsListingProps> = ({
           <button
             onClick={onOpenPromotions}
             className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-slate-100 border border-slate-200 bg-white transition-colors font-medium shadow-2xs"
-            title="Manage store promotions and discounts"
+            title="Promote your products with Sponsored Placements"
           >
             <Tag className="w-3.5 h-3.5" />
-            Add Promotion
+            Promote Products
           </button>
 
           <Button

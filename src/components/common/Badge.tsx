@@ -1,7 +1,13 @@
 import React from 'react';
 import type { AvailabilityStatus } from '../../types/product';
 import type { OrderStatus } from '../../types/order';
-import type { PromotionStatus, PromotionType } from '../../types/promotion';
+import type {
+  AdCampaignStatus,
+  BannerRequestStatus,
+  PromotionStatus,
+  PromotionType,
+  WalletTransactionType,
+} from '../../types/promotion';
 
 interface BadgeProps {
   children: React.ReactNode;
@@ -161,6 +167,107 @@ export const PromotionTypeBadge: React.FC<{ type: PromotionType; className?: str
       className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-[#F5F2FE] text-[#5E17EB] border border-[#DDD0FA] ${className}`}
     >
       {labels[type]}
+    </span>
+  );
+};
+
+export const CAMPAIGN_STATUS_LABELS: Record<AdCampaignStatus, string> = {
+  draft: 'Draft',
+  pending_review: 'Pending Review',
+  scheduled: 'Approved / Scheduled',
+  live: 'Live',
+  paused: 'Paused',
+  completed: 'Completed',
+  rejected: 'Rejected',
+  cancelled: 'Cancelled',
+  suspended: 'Suspended',
+};
+
+export const AdCampaignStatusBadge: React.FC<{
+  status: AdCampaignStatus;
+  className?: string;
+}> = ({ status, className = '' }) => {
+  const styles: Record<AdCampaignStatus, string> = {
+    draft: 'bg-slate-100 text-slate-600 border border-slate-200',
+    pending_review: 'bg-[#FFEDD5] text-[#C2410C] border border-[#FED7AA]/70',
+    scheduled: 'bg-[#EDE9FE] text-[#6D28D9] border border-[#DDD6FE]',
+    live: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]',
+    paused: 'bg-[#FEF9C3] text-[#A16207] border border-[#FEF08A]',
+    completed: 'bg-[#DBEAFE] text-[#1D4ED8] border border-[#BFDBFE]',
+    rejected: 'bg-[#FEE2E2] text-[#B91C1C] border border-[#FECACA]',
+    cancelled: 'bg-slate-100 text-slate-500 border border-slate-200',
+    suspended: 'bg-rose-100 text-rose-800 border border-rose-200',
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${styles[status]} ${className}`}
+    >
+      {CAMPAIGN_STATUS_LABELS[status]}
+    </span>
+  );
+};
+
+export const WALLET_TX_TYPE_LABELS: Record<WalletTransactionType, string> = {
+  top_up: 'Top-up',
+  hold: 'Hold',
+  release: 'Release',
+  charge: 'Charge',
+  refund: 'Refund',
+  adjustment: 'Adjustment',
+};
+
+export const WalletTransactionTypeBadge: React.FC<{
+  type: WalletTransactionType;
+  className?: string;
+}> = ({ type, className = '' }) => {
+  const styles: Record<WalletTransactionType, string> = {
+    top_up: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    hold: 'bg-amber-50 text-amber-700 border border-amber-200',
+    release: 'bg-sky-50 text-sky-700 border border-sky-200',
+    charge: 'bg-[#F5F2FE] text-[#5E17EB] border border-[#DDD0FA]',
+    refund: 'bg-teal-50 text-teal-700 border border-teal-200',
+    adjustment: 'bg-slate-100 text-slate-700 border border-slate-200',
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${styles[type]} ${className}`}
+    >
+      {WALLET_TX_TYPE_LABELS[type]}
+    </span>
+  );
+};
+
+export const BANNER_STATUS_LABELS: Record<BannerRequestStatus, string> = {
+  pending_review: 'Under Review',
+  in_discussion: 'Creative & Schedule Discussion',
+  changes_requested: 'Changes Requested',
+  approved_scheduled: 'Approved & Scheduled',
+  live: 'Live on Homepage',
+  completed: 'Completed',
+  declined: 'Declined',
+};
+
+export const BannerRequestStatusBadge: React.FC<{
+  status: BannerRequestStatus;
+  className?: string;
+}> = ({ status, className = '' }) => {
+  const styles: Record<BannerRequestStatus, string> = {
+    pending_review: 'bg-[#FFEDD5] text-[#C2410C] border border-[#FED7AA]/70',
+    in_discussion: 'bg-sky-50 text-sky-700 border border-sky-200',
+    changes_requested: 'bg-[#FEF9C3] text-[#A16207] border border-[#FEF08A]',
+    approved_scheduled: 'bg-[#EDE9FE] text-[#6D28D9] border border-[#DDD6FE]',
+    live: 'bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]',
+    completed: 'bg-[#DBEAFE] text-[#1D4ED8] border border-[#BFDBFE]',
+    declined: 'bg-[#FEE2E2] text-[#B91C1C] border border-[#FECACA]',
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${styles[status]} ${className}`}
+    >
+      {BANNER_STATUS_LABELS[status]}
     </span>
   );
 };
