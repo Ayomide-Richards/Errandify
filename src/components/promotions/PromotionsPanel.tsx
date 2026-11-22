@@ -3,8 +3,11 @@ import type { Product } from '../../types/product';
 import type {
   AdPlacementId,
   BannerDestinationType,
+  CampaignPaymentSource,
   HomepageBannerRequest,
   SponsoredCampaign,
+  WalletTransaction,
+  WalletTransactionType,
 } from '../../types/promotion';
 import { CATEGORIES } from '../../data/categories';
 import {
@@ -16,10 +19,12 @@ import {
   AdsBackendService,
   evaluateProductAdEligibility,
 } from '../../services/promotionStorage';
+import { SalesStorage } from '../../services/salesStorage';
 import { SettingsStorage } from '../../services/settingsStorage';
 import {
   AdCampaignStatusBadge,
   BannerRequestStatusBadge,
+  WalletTransactionTypeBadge,
 } from '../common/Badge';
 import { Button } from '../common/Button';
 import {
@@ -37,6 +42,7 @@ import {
   Clock,
   CreditCard,
   Eye,
+  FileText,
   Image as ImageIcon,
   Info,
   Layers,
@@ -62,7 +68,7 @@ interface PromotionsPanelProps {
   ) => void;
 }
 
-type PromotionsTabView = 'my_campaigns' | 'banner_requests';
+type PromotionsTabView = 'my_campaigns' | 'banner_requests' | 'ad_wallet';
 
 type PromoteFlowStage = 'closed' | 'steps_1_to_4' | 'review_and_submit' | 'submitted';
 
@@ -100,6 +106,15 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
   const [wallet, setWallet] = useState(() =>
     AdsBackendService.getWalletAccount()
   );
+  const [earningsSummary, setEarningsSummary] = useState(() =>
+    SalesStorage.getEarningsBalanceSummary()
+  );
+  const [transactions, setTransactions] = useState<WalletTransaction[]>(() =>
+    AdsBackendService.getWalletTransactions()
+  );
+  const [txTypeFilter, setTxTypeFilter] = useState<
+    'all' | WalletTransactionType
+  >('all');
   const [bannerRequests, setBannerRequests] = useState<HomepageBannerRequest[]>(
     () => AdsBackendService.getBannerRequests()
   );
@@ -120,6 +135,8 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
   const refreshAdsState = () => {
     setCampaigns(AdsBackendService.getCampaigns(undefined, products));
     setWallet(AdsBackendService.getWalletAccount());
+    setEarningsSummary(SalesStorage.getEarningsBalanceSummary());
+    setTransactions(AdsBackendService.getWalletTransactions());
     setBannerRequests(AdsBackendService.getBannerRequests());
   };
 
@@ -130,9 +147,13 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
   useEffect(() => {
     const handleSync = () => refreshAdsState();
     window.addEventListener('errandify:ads-updated', handleSync);
+    window.addEventListener('errandify:sales-updated', handleSync);
+    window.addEventListener('errandify:orders-updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('errandify:ads-updated', handleSync);
+      window.removeEventListener('errandify:sales-updated', handleSync);
+      window.removeEventListener('errandify:orders-updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, [products]);
@@ -306,13 +327,37 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
     return d.toISOString().split('T')[0];
   }, [effectiveStartDateStr, selectedPackage]);
 
-  const hasSufficientWalletFunds = selectedPackage
-    ? wallet.availableBalance >= selectedPackage.price
-    : true;
-
   const walletShortfall = selectedPackage
     ? Math.max(0, selectedPackage.price - wallet.availableBalance)
     : 0;
+
+  // Evaluate payment source options (Priority 1: Sales Earnings if eligible; otherwise Ad Wallet)
+  const paymentOptions =
+    earningsSummary && wallet
+      ? AdsBackendService.evaluatePromotionPaymentOptions(
+          selectedPackage?.price || 0
+        )
+      : AdsBackendService.evaluatePromotionPaymentOptions(0);
+
+  const [paymentSourceChoice, setPaymentSourceChoice] =
+    useState<CampaignPaymentSource>(() =>
+      SalesStorage.getEarningsBalanceSummary().availableEarnings > 0
+        ? 'sales_earnings'
+        : 'ad_wallet'
+    );
+
+  // If the merchant selected 'sales_earnings' but their available sales earnings cannot cover the selected package,
+  // automatically switch the active selection to 'ad_wallet' so they can fund via Ad Wallet without combining balances.
+  const effectivePaymentSource: CampaignPaymentSource =
+    paymentSourceChoice === 'sales_earnings' &&
+    paymentOptions.canPayWithSalesEarnings
+      ? 'sales_earnings'
+      : 'ad_wallet';
+
+  const canConfirmWithSelectedSource =
+    effectivePaymentSource === 'sales_earnings'
+      ? paymentOptions.canPayWithSalesEarnings
+      : paymentOptions.canPayWithAdWallet;
 
   const handleContinueToReview = () => {
     setPromoteError(null);
@@ -334,6 +379,11 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
       );
       return;
     }
+    // Default payment source by priority when entering Review & Confirm
+    const freshOpts = AdsBackendService.evaluatePromotionPaymentOptions(
+      selectedPackage.price
+    );
+    setPaymentSourceChoice(freshOpts.recommendedPaymentSource);
     setPromoteStage('review_and_submit');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -384,22 +434,27 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
     }
 
     try {
-      const idempotencyKey = `idem-${selectedProductEntry.product.id}-${selectedPlacement}-${selectedPackage.id}-${effectiveStartDateStr}-${Date.now()}`;
+      const idempotencyKey = `idem-${selectedProductEntry.product.id}-${selectedPlacement}-${selectedPackage.id}-${effectiveStartDateStr}-${effectivePaymentSource}-${Date.now()}`;
       const result = AdsBackendService.submitSponsoredCampaign({
         product: selectedProductEntry.product,
         placement: selectedPlacement,
         packageId: selectedPackage.id,
         startMode,
         startDate: effectiveStartDateStr,
+        paymentSource: effectivePaymentSource,
         idempotencyKey,
       });
       refreshAdsState();
       setSubmittedConfirmation(result.campaign);
       setPromoteStage('submitted');
+      const sourceText =
+        result.campaign.paymentSource === 'sales_earnings'
+          ? 'reserved from your Available Sales Earnings'
+          : 'placed on hold in your Ad Wallet';
       notifyIfAllowed(
         'success',
         'Campaign submitted for review',
-        `${formatNaira(result.campaign.price)} has been placed on hold in your Ad Wallet while "${result.campaign.productName}" awaits review.`
+        `${formatNaira(result.campaign.price)} has been ${sourceText} while "${result.campaign.productName}" awaits review.`
       );
     } catch (err: any) {
       setPromoteError(
@@ -629,6 +684,11 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
     [campaigns, selectedCampaignId]
   );
 
+  const filteredTransactions = useMemo(() => {
+    if (txTypeFilter === 'all') return transactions;
+    return transactions.filter((t) => t.type === txTypeFilter);
+  }, [transactions, txTypeFilter]);
+
   // Summary counts for the Promotions Landing Overview
   const liveCount = campaigns.filter((c) => c.status === 'live').length;
   const scheduledCount = campaigns.filter(
@@ -687,9 +747,16 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
       {/* Promotions Landing Overview Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Ad Wallet Summary */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs">
+        <div
+          onClick={() => {
+            setPromoteStage('closed');
+            setSelectedCampaignId(null);
+            setActiveView('ad_wallet');
+          }}
+          className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:border-[#5E17EB]/40 transition-all cursor-pointer group"
+        >
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-slate-500">
+            <p className="text-xs font-medium text-slate-500 group-hover:text-[#5E17EB]">
               Ad Wallet Available Balance
             </p>
             <Wallet className="w-4 h-4 text-[#5E17EB]" />
@@ -698,8 +765,7 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
             {formatNaira(wallet.availableBalance)}
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            Held: {formatNaira(wallet.heldBalance)} · Promo:{' '}
-            {formatNaira(wallet.promotionalBalance)}
+            Held: {formatNaira(wallet.heldBalance)}
           </p>
         </div>
 
@@ -1290,39 +1356,240 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                 </div>
               </div>
 
-              {/* Insufficient Wallet Balance Warning */}
-              {!hasSufficientWalletFunds && selectedPackage && (
-                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2 text-xs text-red-900">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              {/* Payment Source Selection: Sales Earnings vs Ad Wallet */}
+              {selectedPackage && (
+                <div className="space-y-3.5">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-bold">
-                        Insufficient Ad Wallet Available Balance
-                      </p>
-                      <p className="text-red-800 mt-0.5 leading-relaxed">
-                        This package requires{' '}
-                        <span className="font-bold">
-                          {formatNaira(selectedPackage.price)}
-                        </span>
-                        , but your Available Balance is{' '}
-                        <span className="font-bold">
-                          {formatNaira(wallet.availableBalance)}
-                        </span>{' '}
-                        (shortfall: {formatNaira(walletShortfall)}). Held funds cannot be used for new purchases.
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Select Payment Source
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Pay directly from your eligible available sales earnings
+                        or fund through your Ad Wallet.
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => setIsTopUpModalOpen(true)}
-                    leftIcon={<CreditCard className="w-3.5 h-3.5" />}
-                  >
-                    Top Up Ad Wallet Now
-                  </Button>
+
+                  {/* Partial Sales Earnings Shortfall Notice (when 0 < availableSalesEarnings < packagePrice) */}
+                  {paymentOptions.hasPartialSalesEarnings && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 space-y-1.5">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                        Sales Earnings Cannot Cover Full Campaign Cost — Fund
+                        via Ad Wallet
+                      </p>
+                      <p className="text-amber-900 leading-relaxed">
+                        Your eligible available sales earnings are{' '}
+                        <span className="font-bold">
+                          {formatNaira(paymentOptions.availableSalesEarnings)}
+                        </span>
+                        , which is{' '}
+                        <span className="font-bold text-red-700">
+                          {formatNaira(paymentOptions.salesEarningsShortfall)}{' '}
+                          short
+                        </span>{' '}
+                        of the{' '}
+                        <span className="font-bold">
+                          {formatNaira(paymentOptions.packagePrice)}
+                        </span>{' '}
+                        campaign cost. Balances are never silently combined or
+                        partially charged. Please fund this promotion through
+                        your Ad Wallet below.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Option 1: Eligible Available Sales Earnings (Priority 1) */}
+                    <button
+                      type="button"
+                      disabled={!paymentOptions.canPayWithSalesEarnings}
+                      onClick={() => setPaymentSourceChoice('sales_earnings')}
+                      className={`p-4 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                        effectivePaymentSource === 'sales_earnings'
+                          ? 'border-[#5E17EB] bg-[#F8F6FE]'
+                          : paymentOptions.canPayWithSalesEarnings
+                            ? 'border-slate-200 bg-white hover:border-[#5E17EB]/40'
+                            : 'border-slate-200 bg-slate-50/80 opacity-75 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-900">
+                            Sales &amp; Earnings
+                          </span>
+                          {effectivePaymentSource === 'sales_earnings' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#5E17EB] text-white">
+                              Selected
+                            </span>
+                          ) : paymentOptions.canPayWithSalesEarnings ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Eligible
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-200 text-slate-600">
+                              Insufficient
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-lg font-extrabold text-slate-900 tabular-nums">
+                          {formatNaira(paymentOptions.availableSalesEarnings)}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Eligible available balance from delivery-confirmed
+                          orders
+                        </p>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-slate-200/70 text-[11px]">
+                        {paymentOptions.canPayWithSalesEarnings ? (
+                          <span className="text-emerald-700 font-semibold">
+                            Covers full{' '}
+                            {formatNaira(paymentOptions.packagePrice)} cost
+                          </span>
+                        ) : paymentOptions.availableSalesEarnings === 0 ? (
+                          <span className="text-slate-500">
+                            ₦0 eligible (unreleased escrow &amp; pending
+                            withdrawals excluded)
+                          </span>
+                        ) : (
+                          <span className="text-amber-800 font-semibold">
+                            Shortfall:{' '}
+                            {formatNaira(paymentOptions.salesEarningsShortfall)}{' '}
+                            — use Ad Wallet
+                          </span>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Option 2: Ad Wallet */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentSourceChoice('ad_wallet')}
+                      className={`p-4 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                        effectivePaymentSource === 'ad_wallet'
+                          ? 'border-[#5E17EB] bg-[#F8F6FE]'
+                          : 'border-slate-200 bg-white hover:border-[#5E17EB]/40'
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-900">
+                            Ad Wallet
+                          </span>
+                          {effectivePaymentSource === 'ad_wallet' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#5E17EB] text-white">
+                              Selected
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">
+                              Prepaid Wallet
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-lg font-extrabold text-slate-900 tabular-nums">
+                          {formatNaira(paymentOptions.availableAdWallet)}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Available Ad Wallet balance (Held:{' '}
+                          {formatNaira(paymentOptions.heldAdWallet)})
+                        </p>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-slate-200/70 text-[11px]">
+                        {paymentOptions.canPayWithAdWallet ? (
+                          <span className="text-emerald-700 font-semibold">
+                            Covers full{' '}
+                            {formatNaira(paymentOptions.packagePrice)} cost
+                          </span>
+                        ) : (
+                          <span className="text-red-700 font-semibold">
+                            Shortfall:{' '}
+                            {formatNaira(paymentOptions.adWalletShortfall)} —
+                            Top up via Paystack
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Pre-Confirmation Payment Summary (Selected Payment Source & Amount Being Charged) */}
+                  <div className="p-4 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA] space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600 font-medium">
+                        Selected Payment Source
+                      </span>
+                      <span className="font-bold text-slate-900">
+                        {effectivePaymentSource === 'sales_earnings'
+                          ? 'Sales & Earnings (Eligible Available Balance)'
+                          : 'Ad Wallet (Prepaid Balance)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600 font-medium">
+                        Amount Being Charged / Reserved
+                      </span>
+                      <span className="font-extrabold text-[#5E17EB] text-sm">
+                        {formatNaira(selectedPackage.price)}
+                      </span>
+                    </div>
+                    {canConfirmWithSelectedSource && (
+                      <div className="flex items-center justify-between pt-1.5 border-t border-[#DDD0FA]/70">
+                        <span className="text-slate-500">
+                          Remaining Available Balance After Purchase
+                        </span>
+                        <span className="font-bold text-slate-800">
+                          {formatNaira(
+                            (effectivePaymentSource === 'sales_earnings'
+                              ? paymentOptions.availableSalesEarnings
+                              : paymentOptions.availableAdWallet) -
+                              selectedPackage.price
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
+
+              {/* Insufficient Ad Wallet Balance Warning (when Ad Wallet is selected and has insufficient balance) */}
+              {effectivePaymentSource === 'ad_wallet' &&
+                !paymentOptions.canPayWithAdWallet &&
+                selectedPackage && (
+                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2 text-xs text-red-900">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">
+                          Insufficient Ad Wallet Available Balance
+                        </p>
+                        <p className="text-red-800 mt-0.5 leading-relaxed">
+                          This package requires{' '}
+                          <span className="font-bold">
+                            {formatNaira(selectedPackage.price)}
+                          </span>
+                          , but your Ad Wallet Available Balance is{' '}
+                          <span className="font-bold">
+                            {formatNaira(wallet.availableBalance)}
+                          </span>{' '}
+                          (shortfall: {formatNaira(walletShortfall)}). Held
+                          funds, pending withdrawals, and unreleased escrow
+                          orders cannot be used for new purchases.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setIsTopUpModalOpen(true)}
+                      leftIcon={<CreditCard className="w-3.5 h-3.5" />}
+                    >
+                      Top Up Ad Wallet via Paystack
+                    </Button>
+                  </div>
+                )}
 
               {/* Advertising Rules & Content Requirements Notice */}
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2 text-xs text-slate-600 leading-relaxed">
@@ -1341,7 +1608,7 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                     Placement is labelled <span className="font-semibold">Sponsored</span> and rotated fairly; it does not guarantee search rank, views, or sales.
                   </li>
                   <li>
-                    <span className="font-semibold text-slate-800">Hold & Charge:</span> Package price is placed on hold while <span className="font-semibold">Pending Review</span>, released if rejected or cancelled before start, and charged once <span className="font-semibold">Live</span>.
+                    <span className="font-semibold text-slate-800">Hold & Charge:</span> Package price is reserved while <span className="font-semibold">Pending Review</span>, released back to your payment source if rejected or cancelled before start, and charged once <span className="font-semibold">Live</span>.
                   </li>
                 </ul>
               </div>
@@ -1380,7 +1647,7 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                     disabled={
                       !selectedProductEntry?.eligibility.isEligible ||
                       !selectedPackage ||
-                      !hasSufficientWalletFunds
+                      !canConfirmWithSelectedSource
                     }
                     onClick={handleSubmitCampaign}
                   >
@@ -1420,7 +1687,14 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                     <span className="font-bold text-slate-900">
                       {formatNaira(submittedConfirmation.price)}
                     </span>{' '}
-                    has been placed on <span className="font-semibold">Hold</span> in your Ad Wallet (not charged as a completed expense yet).
+                    has been reserved from your{' '}
+                    <span className="font-semibold text-slate-900">
+                      {submittedConfirmation.paymentSource === 'sales_earnings'
+                        ? 'Available Sales Earnings'
+                        : 'Ad Wallet'}
+                    </span>{' '}
+                    (not finalized as a completed expense until the campaign
+                    goes Live).
                   </p>
                 </div>
               </div>
@@ -1447,9 +1721,13 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                   </p>
                 </div>
                 <div>
-                  <span className="text-slate-500">Wallet Hold Status</span>
+                  <span className="text-slate-500">Payment Source & Status</span>
                   <p className="font-bold text-amber-700 mt-0.5">
-                    {formatNaira(submittedConfirmation.price)} Held
+                    {formatNaira(submittedConfirmation.price)} Held (
+                    {submittedConfirmation.paymentSource === 'sales_earnings'
+                      ? 'Sales Earnings'
+                      : 'Ad Wallet'}
+                    )
                   </p>
                 </div>
               </div>
@@ -1492,7 +1770,7 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
         </div>
       ) : (
         <>
-          {/* Section Navigation Tabs (My Campaigns & Banner Requests) */}
+          {/* Section Navigation Tabs (My Campaigns, Banner Requests, Ad Wallet) */}
           <div className="border-b border-slate-200 flex items-center gap-1 sm:gap-2 overflow-x-auto">
             {[
               {
@@ -1504,6 +1782,11 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                 id: 'banner_requests' as PromotionsTabView,
                 label: `Banner Requests (${bannerRequests.length})`,
                 icon: ImageIcon,
+              },
+              {
+                id: 'ad_wallet' as PromotionsTabView,
+                label: 'Ad Wallet',
+                icon: Wallet,
               },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -1672,13 +1955,17 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                                   <p className="font-bold text-slate-900 text-xs">
                                     {formatNaira(camp.price)}
                                   </p>
-                                  <p className="text-[11px] text-slate-500 capitalize">
+                                  <p className="text-[11px] text-slate-500">
+                                    {camp.paymentSource === 'sales_earnings'
+                                      ? 'Sales Earnings'
+                                      : 'Ad Wallet'}{' '}
+                                    ·{' '}
                                     {camp.fundsState === 'held'
-                                      ? 'Funds Held'
+                                      ? 'Held'
                                       : camp.fundsState === 'charged'
                                         ? 'Charged'
                                         : camp.fundsState === 'released'
-                                          ? 'Hold Released'
+                                          ? 'Released'
                                           : camp.fundsState}
                                   </p>
                                 </td>
@@ -2062,6 +2349,315 @@ export const PromotionsPanel: React.FC<PromotionsPanelProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================================== */}
+          {/* VIEW: AD WALLET (Placed after Banner Requests)                        */}
+          {/* ===================================================================== */}
+          {activeView === 'ad_wallet' && (
+            <div className="space-y-6">
+              {/* Prepaid Advertising Wallet Header & Rules */}
+              <div className="bg-slate-900 text-white rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5 max-w-2xl">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#5E17EB] text-white">
+                      <Wallet className="w-3.5 h-3.5" />
+                      Prepaid Advertising Wallet
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white/10 text-slate-200">
+                      <Lock className="w-3 h-3" />
+                      Non-Withdrawable · Separate from Sales & Earnings
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-extrabold">
+                    ErrandMarket Ad Wallet
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                    Your Ad Wallet is a prepaid balance used exclusively for purchasing advertising packages on ErrandMarket. It is completely separate from your store&apos;s <span className="font-semibold text-white">Sales &amp; Earnings</span> settlement balance and cannot be withdrawn to a bank account.
+                  </p>
+                </div>
+
+                {/* Top Up Only — No Withdraw Button */}
+                <div className="shrink-0">
+                  <Button
+                    variant="primary"
+                    onClick={() => setIsTopUpModalOpen(true)}
+                    leftIcon={<CreditCard className="w-4 h-4" />}
+                  >
+                    Top Up via Paystack
+                  </Button>
+                </div>
+              </div>
+
+              {/* Wallet Overview: Visually Distinct Balances */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Available Balance */}
+                <div className="bg-white border-2 border-[#5E17EB]/25 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[#5E17EB]">
+                        Available Balance
+                      </span>
+                      <span className="w-8 h-8 rounded-xl bg-[#F5F2FE] text-[#5E17EB] flex items-center justify-center">
+                        <Wallet className="w-4 h-4" />
+                      </span>
+                    </div>
+                    <p className="text-3xl font-extrabold text-slate-900 mt-3 tracking-tight">
+                      {formatNaira(wallet.availableBalance)}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-4 pt-3 border-t border-slate-100 leading-relaxed">
+                    <span className="font-semibold text-slate-800">
+                      Funds available to purchase advertising packages.
+                    </span>{' '}
+                    Only Available Balance can be used to submit new campaigns; held funds are never treated as available funds.
+                  </p>
+                </div>
+
+                {/* 2. Held Balance */}
+                <div className="bg-white border border-amber-200/90 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                        Held Balance
+                      </span>
+                      <span className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+                        <Clock className="w-4 h-4" />
+                      </span>
+                    </div>
+                    <p className="text-3xl font-extrabold text-slate-900 mt-3 tracking-tight">
+                      {formatNaira(wallet.heldBalance)}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-4 pt-3 border-t border-slate-100 leading-relaxed">
+                    <span className="font-semibold text-slate-800">
+                      Funds currently reserved for campaigns awaiting review.
+                    </span>{' '}
+                    Charged when a campaign goes Live, or automatically released back to Available Balance if rejected or cancelled before start.
+                  </p>
+                </div>
+              </div>
+
+              {/* Minimum Top-Up & Hold-and-Charge Rules */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-[#5E17EB] shrink-0 mt-0.5" />
+                  <span>
+                    <span className="font-bold text-slate-900">
+                      Hold &amp; Charge Protection:
+                    </span>{' '}
+                    Submitting a campaign places a hold on your Available Balance. You are only charged when the campaign enters the <span className="font-semibold text-slate-800">Live</span> state. Top-ups are credited only after server-side Paystack verification.
+                  </span>
+                </div>
+                <div className="shrink-0 text-[11px] font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200/80">
+                  Minimum Top-Up:{' '}
+                  {walletConfig.minimumTopUpAmount !== null
+                    ? formatNaira(walletConfig.minimumTopUpAmount)
+                    : 'No minimum enforced (Open configuration)'}
+                </div>
+              </div>
+
+              {/* Immutable Wallet Transaction History */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900">
+                        Wallet Transaction History
+                      </h3>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600">
+                        <FileText className="w-3 h-3" />
+                        Immutable Ledger
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Read-only ledger of all top-ups, holds, releases, charges, refunds, and adjustments.
+                    </p>
+                  </div>
+
+                  {/* Filter by Transaction Type */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'all', label: 'All' },
+                        { id: 'top_up', label: 'Top-up' },
+                        { id: 'hold', label: 'Hold' },
+                        { id: 'release', label: 'Release' },
+                        { id: 'charge', label: 'Charge' },
+                        { id: 'refund', label: 'Refund' },
+                        { id: 'adjustment', label: 'Adjustment' },
+                      ] as const
+                    ).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setTxTypeFilter(f.id)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                          txTypeFilter === f.id
+                            ? 'bg-[#5E17EB] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                        <th className="py-3 px-4">Date &amp; Time</th>
+                        <th className="py-3 px-4">Type</th>
+                        <th className="py-3 px-4">Payment Source</th>
+                        <th className="py-3 px-4">Description / Reference</th>
+                        <th className="py-3 px-4">Related Campaign</th>
+                        <th className="py-3 px-4 text-right">Amount</th>
+                        <th className="py-3 px-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {filteredTransactions.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="py-10 text-center text-slate-500"
+                          >
+                            No wallet transactions match the selected filter.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTransactions.map((tx) => {
+                          const isMoneyIn =
+                            tx.type === 'top_up' ||
+                            tx.type === 'refund' ||
+                            (tx.type === 'adjustment' &&
+                              tx.balanceImpact === 'credit');
+                          const isHoldOrRelease =
+                            tx.type === 'hold' || tx.type === 'release';
+                          const isSalesSource =
+                            tx.paymentSource === 'sales_earnings' ||
+                            tx.fundingSource === 'sales_earnings';
+
+                          return (
+                            <tr
+                              key={tx.id}
+                              className="hover:bg-slate-50/70 transition-colors"
+                            >
+                              <td className="py-3.5 px-4 text-slate-600 whitespace-nowrap">
+                                {tx.formattedDate}
+                              </td>
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <WalletTransactionTypeBadge type={tx.type} />
+                              </td>
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                    isSalesSource
+                                      ? 'bg-[#F3EFFE] text-[#5E17EB] border border-[#DDD0FA]'
+                                      : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                  }`}
+                                >
+                                  {isSalesSource
+                                    ? 'Sales Earnings'
+                                    : 'Ad Wallet'}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <p className="font-semibold text-slate-900">
+                                  {tx.description}
+                                </p>
+                                <p className="text-[11px] font-mono text-slate-400 mt-0.5">
+                                  Ref: {tx.reference}
+                                </p>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {tx.relatedCampaignId ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveView('my_campaigns');
+                                      setSelectedCampaignId(
+                                        tx.relatedCampaignId!
+                                      );
+                                    }}
+                                    className="text-left group"
+                                  >
+                                    <span className="font-mono font-bold text-[#5E17EB] group-hover:underline">
+                                      {tx.relatedCampaignId}
+                                    </span>
+                                    {tx.relatedCampaignName && (
+                                      <p className="text-[11px] text-slate-500 truncate max-w-[180px]">
+                                        {tx.relatedCampaignName}
+                                      </p>
+                                    )}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                <span
+                                  className={`font-extrabold ${
+                                    isMoneyIn
+                                      ? 'text-emerald-700'
+                                      : isHoldOrRelease
+                                        ? 'text-amber-700'
+                                        : 'text-slate-900'
+                                  }`}
+                                >
+                                  {tx.balanceImpact === 'credit'
+                                    ? '+'
+                                    : tx.balanceImpact === 'debit'
+                                      ? '−'
+                                      : ''}
+                                  {formatNaira(tx.amount)}
+                                </span>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                  {isSalesSource
+                                    ? tx.type === 'hold'
+                                      ? 'Reserved from Sales Earnings'
+                                      : tx.type === 'charge'
+                                        ? 'Charged from Sales Earnings'
+                                        : tx.type === 'release'
+                                          ? 'Returned to Sales Earnings'
+                                          : 'Sales Earnings'
+                                    : tx.type === 'top_up'
+                                      ? 'Added to Available'
+                                      : tx.type === 'hold'
+                                        ? 'Moved to Held'
+                                        : tx.type === 'release'
+                                          ? 'Returned to Available'
+                                          : tx.type === 'charge'
+                                            ? 'Charged from Held'
+                                            : tx.type === 'refund'
+                                              ? 'Credited to Available'
+                                              : 'Balance Adjustment'}
+                                </p>
+                              </td>
+                              <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                    tx.status === 'completed'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : tx.status === 'pending'
+                                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                        : 'bg-red-50 text-red-700 border border-red-200'
+                                  }`}
+                                >
+                                  {tx.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

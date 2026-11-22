@@ -53,6 +53,8 @@ export type AdCampaignStatus =
   | 'cancelled'
   | 'suspended';
 
+export type CampaignPaymentSource = 'sales_earnings' | 'ad_wallet';
+
 export interface CampaignActionPermissions {
   canPause: boolean;
   canResume: boolean;
@@ -107,6 +109,7 @@ export interface SponsoredCampaign {
   startDate: string; // YYYY-MM-DD or ISO
   endDate: string; // YYYY-MM-DD or ISO
   status: AdCampaignStatus;
+  paymentSource: CampaignPaymentSource;
   fundsState: 'none' | 'held' | 'charged' | 'released' | 'refunded';
   submittedAt?: string;
   createdAt: string;
@@ -145,7 +148,8 @@ export interface WalletTransaction {
   reference: string;
   amount: number;
   balanceImpact: 'credit' | 'hold_reserve' | 'hold_release' | 'debit';
-  fundingSource?: 'available' | 'promotional';
+  fundingSource?: 'available' | 'promotional' | 'sales_earnings';
+  paymentSource?: CampaignPaymentSource;
   status: WalletTransactionStatus;
   relatedCampaignId?: string;
   relatedCampaignName?: string;

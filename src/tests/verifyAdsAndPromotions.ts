@@ -4,6 +4,7 @@ import {
   evaluateProductAdEligibility,
 } from '../services/promotionStorage';
 import { ProductStorage } from '../services/productStorage';
+import { SalesStorage } from '../services/salesStorage';
 import { SettingsStorage } from '../services/settingsStorage';
 
 // Mock localStorage in memory for verification
@@ -422,5 +423,145 @@ assert(
   '11. Isolated test fixtures are explicitly flagged with isTestFixture: true and can be loaded on demand'
 );
 AdsBackendService.resetToCleanLiveWorkspace();
+SalesStorage.resetSalesAndWithdrawals();
+
+// 12. Verify Promotions Payment via Sales Earnings vs Ad Wallet (Priority, Shortfall, Escrow/Withdrawal Protection, and Ledgers)
+// Initial eligible Available Sales Earnings = ₦61,500 (from delivered order ord-1004; ₦372,350 in escrow and ₦59,000 pending withdrawal are excluded)
+const initialOpts = AdsBackendService.evaluatePromotionPaymentOptions(7500);
+assert(
+  initialOpts.availableSalesEarnings === 61500 &&
+    initialOpts.canPayWithSalesEarnings === true &&
+    initialOpts.recommendedPaymentSource === 'sales_earnings',
+  '12a. When merchant has eligible Available Sales Earnings (₦61,500 >= ₦7,500), Sales Earnings is recommended as Priority 1 payment source'
+);
+
+// Merchant pays for a ₦7,500 campaign directly from Sales Earnings
+const salesFundedSub = AdsBackendService.submitSponsoredCampaign({
+  product: ofadaRice,
+  placement: 'search_results',
+  packageId: search7dPkg.id,
+  startMode: 'immediate',
+  paymentSource: 'sales_earnings',
+  idempotencyKey: 'idem-sales-promo-001',
+});
+assert(
+  salesFundedSub.campaign.paymentSource === 'sales_earnings' &&
+    salesFundedSub.campaign.fundsState === 'held' &&
+    salesFundedSub.holdTransaction.paymentSource === 'sales_earnings' &&
+    SalesStorage.getEarningsBalanceSummary().availableEarnings === 54000 && // 61,500 - 7,500
+    SalesStorage.getEarningsBalanceSummary().promotionSpendFromEarnings === 7500 &&
+    AdsBackendService.getWalletAccount().availableBalance === 0,
+  '12b. Paying for a ₦7,500 promotion from Sales Earnings reserves ₦7,500 from Available Sales Earnings (now ₦54,000), records paymentSource="sales_earnings" on campaign and ledgers, and leaves Ad Wallet untouched'
+);
+
+// Retrying same Sales Earnings campaign submission is deduplicated (no double charge!)
+const salesFundedRetry = AdsBackendService.submitSponsoredCampaign({
+  product: ofadaRice,
+  placement: 'search_results',
+  packageId: search7dPkg.id,
+  startMode: 'immediate',
+  paymentSource: 'sales_earnings',
+  idempotencyKey: 'idem-sales-promo-001',
+});
+assert(
+  salesFundedRetry.deduplicated === true &&
+    SalesStorage.getEarningsBalanceSummary().availableEarnings === 54000,
+  '12c. Duplicate campaign submission with paymentSource="sales_earnings" is deduplicated without double-charging Sales Earnings'
+);
+
+// Approving the Sales Earnings-funded campaign to Live finalizes the charge without deducting a second time
+const approvedSalesCamp = AdsBackendService.processAdminCampaignReview({
+  campaignId: salesFundedSub.campaign.id,
+  decision: 'approved',
+  referenceDateStr: salesFundedSub.campaign.startDate,
+});
+assert(
+  approvedSalesCamp.campaign.status === 'live' &&
+    approvedSalesCamp.campaign.fundsState === 'charged' &&
+    approvedSalesCamp.campaign.paymentSource === 'sales_earnings' &&
+    approvedSalesCamp.transaction?.paymentSource === 'sales_earnings' &&
+    SalesStorage.getEarningsBalanceSummary().availableEarnings === 54000 &&
+    SalesStorage.getEarningsBalanceSummary().promotionChargedFromEarnings === 7500,
+  '12d. Approving a Sales Earnings-funded campaign to Live finalizes the charge in Sales Earnings ledger without double-deducting'
+);
+
+// Now merchant requests a withdrawal of ₦45,000 from their remaining ₦54,000 Available Sales Earnings -> leaves ₦9,000 Available Sales Earnings
+SalesStorage.requestWithdrawal({
+  amount: 45000,
+  idempotencyKey: 'idem-wdr-for-promo-test',
+});
+assert(
+  SalesStorage.getEarningsBalanceSummary().availableEarnings === 9000,
+  '12e. Requesting a ₦45,000 withdrawal reduces Available Sales Earnings from ₦54,000 to ₦9,000 (funds reserved for pending withdrawal cannot be spent on promotions)'
+);
+
+// Evaluate payment options for a ₦22,000 package when Available Sales Earnings is ₦9,000 (Insufficient Sales Earnings -> Shortfall ₦13,000)
+const shortfallOpts = AdsBackendService.evaluatePromotionPaymentOptions(22000);
+assert(
+  shortfallOpts.availableSalesEarnings === 9000 &&
+    shortfallOpts.canPayWithSalesEarnings === false &&
+    shortfallOpts.hasPartialSalesEarnings === true &&
+    shortfallOpts.salesEarningsShortfall === 13000 &&
+    shortfallOpts.recommendedPaymentSource === 'ad_wallet',
+  '12f. When Available Sales Earnings (₦9,000) cannot cover full campaign cost (₦22,000), evaluatePromotionPaymentOptions reports exact shortfall (₦13,000) and recommends Ad Wallet without combining balances'
+);
+
+// Attempting to force-pay the ₦22,000 campaign from Sales Earnings (₦9,000) is blocked by the backend (even though ₦372,350 is in escrow and ₦104,000 is in pending withdrawals!)
+let insufficientSalesEarningsBlocked = false;
+try {
+  AdsBackendService.submitSponsoredCampaign({
+    product: classicSneakers,
+    placement: 'home_featured',
+    packageId: expensiveHomePkg.id,
+    startMode: 'immediate',
+    paymentSource: 'sales_earnings',
+  });
+} catch {
+  insufficientSalesEarningsBlocked = true;
+}
+assert(
+  insufficientSalesEarningsBlocked &&
+    SalesStorage.getEarningsBalanceSummary().availableEarnings === 9000,
+  '12g. Backend blocks paying for a ₦22,000 campaign from Sales Earnings when only ₦9,000 is available — pending withdrawals and unreleased escrow orders can never be spent'
+);
+
+// Withdraw the remaining ₦9,000 so Available Sales Earnings is ₦0, then top up Ad Wallet and fund the promotion through Ad Wallet
+SalesStorage.requestWithdrawal({
+  amount: 9000,
+  idempotencyKey: 'idem-wdr-clear-remaining',
+});
+const zeroSalesOpts = AdsBackendService.evaluatePromotionPaymentOptions(7500);
+assert(
+  zeroSalesOpts.availableSalesEarnings === 0 &&
+    zeroSalesOpts.canPayWithSalesEarnings === false &&
+    zeroSalesOpts.recommendedPaymentSource === 'ad_wallet',
+  '12h. When merchant has ₦0 Available Sales Earnings, payment defaults to Ad Wallet'
+);
+
+AdsBackendService.verifyAndRecordPaystackTopUp({
+  amount: 15000,
+  reference: 'PSK-AD-WALLET-FALLBACK-001',
+  serverVerified: true,
+  paymentOutcome: 'success',
+});
+const walletFundedSub = AdsBackendService.submitSponsoredCampaign({
+  product: classicSneakers,
+  placement: 'search_results',
+  packageId: search7dPkg.id,
+  startMode: 'immediate',
+  paymentSource: 'ad_wallet',
+  idempotencyKey: 'idem-wallet-promo-001',
+});
+assert(
+  walletFundedSub.campaign.paymentSource === 'ad_wallet' &&
+    walletFundedSub.holdTransaction.paymentSource === 'ad_wallet' &&
+    walletFundedSub.wallet.availableBalance === 7500 &&
+    walletFundedSub.wallet.heldBalance === 7500 &&
+    SalesStorage.getEarningsBalanceSummary().availableEarnings === 0,
+  '12i. Merchant with ₦0 Available Sales Earnings successfully funds promotion through Ad Wallet with paymentSource="ad_wallet" recorded on campaign and transaction history'
+);
+
+AdsBackendService.resetToCleanLiveWorkspace();
+SalesStorage.resetSalesAndWithdrawals();
 
 console.log('--- ALL ADVERTISING & PROMOTIONS SCENARIOS VERIFIED ---');

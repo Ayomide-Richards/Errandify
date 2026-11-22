@@ -18,6 +18,7 @@ import type {
   BannerUploadValidationConfig,
   CampaignActionPermissions,
   CampaignDailyMetric,
+  CampaignPaymentSource,
   CampaignPerformanceSummary,
   CuratedCollectionOption,
   HomepageBannerRequest,
@@ -28,6 +29,7 @@ import type {
   WalletTransaction,
 } from '../types/promotion';
 import { getProductPriceDisplay, getProductStock } from './productStorage';
+import { SalesStorage } from './salesStorage';
 import { SettingsStorage } from './settingsStorage';
 
 const SYSTEM_PACKAGES_KEY = 'errandify_ads_system_packages_v1';
@@ -378,8 +380,14 @@ export function computeCampaignPermissions(
   status: AdCampaignStatus,
   fundsState: SponsoredCampaign['fundsState'],
   price: number,
-  productEligibleForResume = true
+  productEligibleForResume = true,
+  paymentSource: CampaignPaymentSource = 'ad_wallet'
 ): CampaignActionPermissions {
+  const destinationLabel =
+    paymentSource === 'sales_earnings'
+      ? 'Available Sales Earnings'
+      : 'Ad Wallet Available Balance';
+
   if (status === 'draft') {
     return {
       canPause: false,
@@ -387,7 +395,7 @@ export function computeCampaignPermissions(
       canCancel: true,
       canSubmitDraft: true,
       cancellationPolicyNote:
-        'This draft campaign has not been submitted and no wallet funds are held.',
+        'This draft campaign has not been submitted and no funds are held.',
       refundableHoldAmount: 0,
     };
   }
@@ -400,7 +408,7 @@ export function computeCampaignPermissions(
       canSubmitDraft: false,
       cancellationPolicyNote:
         fundsState === 'held'
-          ? `This campaign is awaiting review and has not started. Cancelling now will immediately release the held funds (₦${price.toLocaleString()}) back to your Ad Wallet Available Balance.`
+          ? `This campaign is awaiting review and has not started. Cancelling now will immediately release the held funds (₦${price.toLocaleString()}) back to your ${destinationLabel}.`
           : 'This campaign has not started. Cancelling will close the submission.',
       refundableHoldAmount: fundsState === 'held' ? price : 0,
     };
@@ -414,7 +422,7 @@ export function computeCampaignPermissions(
       canSubmitDraft: false,
       cancellationPolicyNote:
         fundsState === 'held'
-          ? `This campaign is scheduled for a future start date. Cancelling before the start date will release the held funds (₦${price.toLocaleString()}) back to your Ad Wallet Available Balance.`
+          ? `This campaign is scheduled for a future start date. Cancelling before the start date will release the held funds (₦${price.toLocaleString()}) back to your ${destinationLabel}.`
           : 'Cancelling before the scheduled start date will stop the campaign from going live.',
       refundableHoldAmount: fundsState === 'held' ? price : 0,
     };
@@ -722,10 +730,19 @@ export const AdsBackendService = {
       const stored = localStorage.getItem(getWalletTxStorageKey(merchantId));
       if (!stored) return [];
       const list: WalletTransaction[] = JSON.parse(stored);
-      return list.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
+      return list
+        .map((tx) => ({
+          ...tx,
+          paymentSource:
+            tx.paymentSource ||
+            (tx.fundingSource === 'sales_earnings'
+              ? 'sales_earnings'
+              : 'ad_wallet'),
+        }))
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
     } catch {
       return [];
     }
@@ -823,6 +840,7 @@ export const AdsBackendService = {
           amount: Math.round(payload.amount),
           balanceImpact: 'credit',
           fundingSource: 'available',
+          paymentSource: 'ad_wallet',
           status: 'failed',
         },
         merchantId
@@ -851,6 +869,7 @@ export const AdsBackendService = {
         amount: Math.round(payload.amount),
         balanceImpact: 'credit',
         fundingSource: 'available',
+        paymentSource: 'ad_wallet',
         status: 'completed',
       },
       merchantId
@@ -886,13 +905,17 @@ export const AdsBackendService = {
           const productStillEligible = matchedProduct
             ? evaluateProductAdEligibility(matchedProduct).isEligible
             : true;
+          const resolvedSource: CampaignPaymentSource =
+            c.paymentSource || 'ad_wallet';
           return {
             ...c,
+            paymentSource: resolvedSource,
             permissions: computeCampaignPermissions(
               c.status,
               c.fundsState,
               c.price,
-              productStillEligible
+              productStillEligible,
+              resolvedSource
             ),
           };
         })
@@ -991,6 +1014,7 @@ export const AdsBackendService = {
       startDate: startStr,
       endDate: endStr,
       status: 'draft',
+      paymentSource: 'ad_wallet',
       fundsState: 'none',
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -1005,11 +1029,74 @@ export const AdsBackendService = {
   },
 
   /**
+   * Evaluates payment source eligibility, available balances, and shortfalls
+   * for purchasing a promotion of `packagePrice`:
+   * 1. Priority 1: Pay directly from eligible available sales earnings if `availableSalesEarnings >= packagePrice`.
+   * 2. Priority 2: If no eligible sales earnings are available (`availableSalesEarnings === 0`), fund through Ad Wallet.
+   * 3. Priority 3: If `0 < availableSalesEarnings < packagePrice`, reports the available sales earnings and exact shortfall,
+   *    and directs payment through the Ad Wallet without combining or partially charging balances.
+   */
+  evaluatePromotionPaymentOptions(
+    packagePrice: number,
+    merchantId: string = AUTHENTICATED_MERCHANT_ID
+  ): {
+    packagePrice: number;
+    availableSalesEarnings: number;
+    canPayWithSalesEarnings: boolean;
+    hasPartialSalesEarnings: boolean;
+    salesEarningsShortfall: number;
+    awaitingReleaseInEscrow: number;
+    pendingWithdrawals: number;
+    availableAdWallet: number;
+    heldAdWallet: number;
+    canPayWithAdWallet: boolean;
+    adWalletShortfall: number;
+    recommendedPaymentSource: CampaignPaymentSource;
+  } {
+    const earnings = SalesStorage.getEarningsBalanceSummary();
+    const wallet = this.getWalletAccount(merchantId);
+    const price = Math.max(0, Math.round(Number(packagePrice) || 0));
+
+    const availableSalesEarnings = earnings.availableEarnings;
+    const canPayWithSalesEarnings =
+      price > 0 && availableSalesEarnings >= price;
+    const hasPartialSalesEarnings =
+      price > 0 &&
+      availableSalesEarnings > 0 &&
+      availableSalesEarnings < price;
+    const salesEarningsShortfall = Math.max(0, price - availableSalesEarnings);
+
+    const availableAdWallet = wallet.availableBalance;
+    const canPayWithAdWallet = price > 0 && availableAdWallet >= price;
+    const adWalletShortfall = Math.max(0, price - availableAdWallet);
+
+    const recommendedPaymentSource: CampaignPaymentSource =
+      canPayWithSalesEarnings ? 'sales_earnings' : 'ad_wallet';
+
+    return {
+      packagePrice: price,
+      availableSalesEarnings,
+      canPayWithSalesEarnings,
+      hasPartialSalesEarnings,
+      salesEarningsShortfall,
+      awaitingReleaseInEscrow: earnings.awaitingReleaseInEscrow,
+      pendingWithdrawals: earnings.pendingWithdrawals,
+      availableAdWallet,
+      heldAdWallet: wallet.heldBalance,
+      canPayWithAdWallet,
+      adWalletShortfall,
+      recommendedPaymentSource,
+    };
+  },
+
+  /**
    * Submits a Sponsored Product Campaign:
    * 1. Validates merchant ownership, product eligibility, package, and start date.
-   * 2. Validates available wallet funds (never treating Held Balance as available).
-   * 3. Places the package price on HOLD in the Ad Wallet (does NOT deduct as a final charge yet).
-   * 4. Records an immutable 'hold' transaction in the wallet ledger.
+   * 2. Validates the selected payment source ('sales_earnings' or 'ad_wallet'):
+   *    - Never allows pending withdrawals, funds reserved for another transaction, or unreleased escrow orders to be spent.
+   *    - Never silently combines balances when Sales Earnings cannot cover the full campaign cost.
+   * 3. Reserves/holds the package price from the selected payment source.
+   * 4. Records an immutable transaction in the relevant ledgers with `paymentSource`.
    * 5. Sets campaign status to 'pending_review'.
    */
   submitSponsoredCampaign(payload: {
@@ -1022,6 +1109,7 @@ export const AdsBackendService = {
     packageId: string;
     startMode: 'immediate' | 'future';
     startDate?: string;
+    paymentSource?: CampaignPaymentSource;
     idempotencyKey?: string;
     draftCampaignId?: string;
   }): {
@@ -1035,7 +1123,10 @@ export const AdsBackendService = {
       throw new Error('Unauthorized merchant campaign submission.');
     }
 
-    // Check idempotency key to prevent duplicate campaign submissions or duplicate wallet holds
+    const paymentSource: CampaignPaymentSource =
+      payload.paymentSource || 'ad_wallet';
+
+    // Check idempotency key to prevent duplicate campaign submissions or duplicate charges/holds
     const existingCampaigns = this.getCampaigns(merchantId);
     if (payload.idempotencyKey) {
       const duplicate = existingCampaigns.find(
@@ -1094,30 +1185,47 @@ export const AdsBackendService = {
       resolvedStartDate = payload.startDate;
     }
 
-    // 4. Validate available wallet balance (Held Balance is never available!)
-    const wallet = this.getWalletAccount(merchantId);
-    if (wallet.availableBalance < pkg.price) {
-      const shortfall = pkg.price - wallet.availableBalance;
-      throw new Error(
-        `Insufficient Available Balance in your Ad Wallet. Package price is ₦${pkg.price.toLocaleString()}, Available Balance is ₦${wallet.availableBalance.toLocaleString()} (need ₦${shortfall.toLocaleString()} more). Please top up your Ad Wallet before submitting.`
-      );
-    }
-
-    // 5. Place package price on HOLD in Ad Wallet
-    const updatedWallet: AdWalletAccount = {
-      ...wallet,
-      availableBalance: wallet.availableBalance - pkg.price,
-      heldBalance: wallet.heldBalance + pkg.price,
-      updatedAt: new Date().toISOString(),
-    };
-    this.saveWalletAccount(updatedWallet, merchantId);
-
     const nowIso = new Date().toISOString();
     const endDateStr = addDaysToDateStr(resolvedStartDate, pkg.durationDays);
     const priceDisplay = getProductPriceDisplay(payload.product);
     const campaignId =
       payload.draftCampaignId ||
       `camp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    const campaignLabel = `${payload.product.name} — ${placementInfo.name}`;
+
+    // 4. Validate and reserve funds from the chosen paymentSource
+    let updatedWallet = this.getWalletAccount(merchantId);
+
+    if (paymentSource === 'sales_earnings') {
+      // Reserve from Eligible Available Sales Earnings (validates availableEarnings >= pkg.price on backend)
+      SalesStorage.reserveSalesEarningsForPromotion({
+        merchantId,
+        campaignId,
+        campaignName: campaignLabel,
+        productId: payload.product.id,
+        productName: payload.product.name,
+        placementName: placementInfo.name,
+        packageName: pkg.name,
+        amount: pkg.price,
+        idempotencyKey: payload.idempotencyKey,
+      });
+    } else {
+      // Reserve from Ad Wallet Available Balance (Held Balance is never available!)
+      if (updatedWallet.availableBalance < pkg.price) {
+        const shortfall = pkg.price - updatedWallet.availableBalance;
+        throw new Error(
+          `Insufficient Available Balance in your Ad Wallet. Package price is ₦${pkg.price.toLocaleString()}, Available Balance is ₦${updatedWallet.availableBalance.toLocaleString()} (need ₦${shortfall.toLocaleString()} more). Please top up your Ad Wallet before submitting.`
+        );
+      }
+
+      updatedWallet = {
+        ...updatedWallet,
+        availableBalance: updatedWallet.availableBalance - pkg.price,
+        heldBalance: updatedWallet.heldBalance + pkg.price,
+        updatedAt: nowIso,
+      };
+      this.saveWalletAccount(updatedWallet, merchantId);
+    }
 
     const newCampaign: SponsoredCampaign = {
       id: campaignId,
@@ -1137,6 +1245,7 @@ export const AdsBackendService = {
       startDate: resolvedStartDate,
       endDate: endDateStr,
       status: 'pending_review',
+      paymentSource,
       fundsState: 'held',
       submittedAt: nowIso,
       createdAt: nowIso,
@@ -1149,7 +1258,9 @@ export const AdsBackendService = {
       permissions: computeCampaignPermissions(
         'pending_review',
         'held',
-        pkg.price
+        pkg.price,
+        true,
+        paymentSource
       ),
       idempotencyKey: payload.idempotencyKey,
     };
@@ -1159,19 +1270,27 @@ export const AdsBackendService = {
       : existingCampaigns;
     this.saveCampaigns([newCampaign, ...filteredExisting], merchantId);
 
-    // 6. Record immutable HOLD ledger transaction
+    // 6. Record immutable HOLD ledger transaction with explicit paymentSource
     const holdTx = this.appendWalletTransaction(
       {
         merchantId,
         type: 'hold',
-        description: `Funds placed on hold for campaign awaiting review (${pkg.name})`,
-        reference: `HLD-${campaignId.toUpperCase()}`,
+        description:
+          paymentSource === 'sales_earnings'
+            ? `Promotion payment reserved from Sales Earnings for campaign awaiting review (${pkg.name})`
+            : `Funds placed on hold in Ad Wallet for campaign awaiting review (${pkg.name})`,
+        reference:
+          paymentSource === 'sales_earnings'
+            ? `ERN-HLD-${campaignId.toUpperCase()}`
+            : `HLD-${campaignId.toUpperCase()}`,
         amount: pkg.price,
         balanceImpact: 'hold_reserve',
-        fundingSource: 'available',
+        fundingSource:
+          paymentSource === 'sales_earnings' ? 'sales_earnings' : 'available',
+        paymentSource,
         status: 'completed',
         relatedCampaignId: campaignId,
-        relatedCampaignName: `${payload.product.name} — ${placementInfo.name}`,
+        relatedCampaignName: campaignLabel,
       },
       merchantId
     );
@@ -1187,9 +1306,9 @@ export const AdsBackendService = {
 
   /**
    * Backend lifecycle handler for when the Errandify team approves or rejects a Pending Review campaign.
-   * - If rejected: releases the held funds back to Available Balance and records a 'release' transaction.
+   * - If rejected: releases the held funds back to the original payment source (Sales Earnings or Ad Wallet) and records a 'release' transaction.
    * - If approved with future start date: transitions to 'scheduled' ('Approved / Scheduled'), keeping funds held until start.
-   * - If approved and start date has arrived: transitions to 'live' and charges the held funds ('charge' transaction).
+   * - If approved and start date has arrived: transitions to 'live' and finalizes the charge from the original payment source ('charge' transaction).
    */
   processAdminCampaignReview(payload: {
     campaignId: string;
@@ -1217,28 +1336,45 @@ export const AdsBackendService = {
       );
     }
 
+    const paymentSource: CampaignPaymentSource =
+      campaign.paymentSource || 'ad_wallet';
     const nowIso = new Date().toISOString();
     const todayStr = payload.referenceDateStr || nowIso.split('T')[0];
-    const wallet = this.getWalletAccount(merchantId);
+    let wallet = this.getWalletAccount(merchantId);
 
     if (payload.decision === 'rejected') {
-      const updatedWallet: AdWalletAccount = {
-        ...wallet,
-        heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
-        availableBalance: wallet.availableBalance + campaign.price,
-        updatedAt: nowIso,
-      };
-      this.saveWalletAccount(updatedWallet, merchantId);
+      if (paymentSource === 'sales_earnings') {
+        SalesStorage.releaseSalesEarningsPromotionHold(
+          campaign.id,
+          'Campaign did not pass review'
+        );
+      } else {
+        wallet = {
+          ...wallet,
+          heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
+          availableBalance: wallet.availableBalance + campaign.price,
+          updatedAt: nowIso,
+        };
+        this.saveWalletAccount(wallet, merchantId);
+      }
 
       const releaseTx = this.appendWalletTransaction(
         {
           merchantId,
           type: 'release',
-          description: `Held funds released after campaign review rejection`,
-          reference: `REL-${campaign.id.toUpperCase()}`,
+          description:
+            paymentSource === 'sales_earnings'
+              ? `Reserved Sales Earnings released after campaign review rejection`
+              : `Held Ad Wallet funds released after campaign review rejection`,
+          reference:
+            paymentSource === 'sales_earnings'
+              ? `ERN-REL-${campaign.id.toUpperCase()}`
+              : `REL-${campaign.id.toUpperCase()}`,
           amount: campaign.price,
           balanceImpact: 'hold_release',
-          fundingSource: 'available',
+          fundingSource:
+            paymentSource === 'sales_earnings' ? 'sales_earnings' : 'available',
+          paymentSource,
           status: 'completed',
           relatedCampaignId: campaign.id,
           relatedCampaignName: `${campaign.productName} — ${campaign.placementName}`,
@@ -1248,6 +1384,7 @@ export const AdsBackendService = {
 
       const rejectedCampaign: SponsoredCampaign = {
         ...campaign,
+        paymentSource,
         status: 'rejected',
         fundsState: 'released',
         updatedAt: nowIso,
@@ -1267,7 +1404,9 @@ export const AdsBackendService = {
         permissions: computeCampaignPermissions(
           'rejected',
           'released',
-          campaign.price
+          campaign.price,
+          true,
+          paymentSource
         ),
       };
 
@@ -1277,7 +1416,7 @@ export const AdsBackendService = {
 
       return {
         campaign: rejectedCampaign,
-        wallet: updatedWallet,
+        wallet,
         transaction: releaseTx,
       };
     }
@@ -1287,6 +1426,7 @@ export const AdsBackendService = {
     if (isFutureStart) {
       const scheduledCampaign: SponsoredCampaign = {
         ...campaign,
+        paymentSource,
         status: 'scheduled',
         fundsState: 'held',
         updatedAt: nowIso,
@@ -1303,7 +1443,9 @@ export const AdsBackendService = {
         permissions: computeCampaignPermissions(
           'scheduled',
           'held',
-          campaign.price
+          campaign.price,
+          true,
+          paymentSource
         ),
       };
       campaigns[idx] = scheduledCampaign;
@@ -1316,22 +1458,34 @@ export const AdsBackendService = {
     }
 
     // Start date has arrived -> transition to Live and convert Hold into Charge!
-    const updatedWallet: AdWalletAccount = {
-      ...wallet,
-      heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
-      updatedAt: nowIso,
-    };
-    this.saveWalletAccount(updatedWallet, merchantId);
+    if (paymentSource === 'sales_earnings') {
+      SalesStorage.finalizeSalesEarningsPromotionCharge(campaign.id);
+    } else {
+      wallet = {
+        ...wallet,
+        heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
+        updatedAt: nowIso,
+      };
+      this.saveWalletAccount(wallet, merchantId);
+    }
 
     const chargeTx = this.appendWalletTransaction(
       {
         merchantId,
         type: 'charge',
-        description: `Campaign approved and went Live — held package fee charged (${campaign.packageName})`,
-        reference: `CHG-${campaign.id.toUpperCase()}`,
+        description:
+          paymentSource === 'sales_earnings'
+            ? `Campaign approved and went Live — package fee charged from Sales Earnings (${campaign.packageName})`
+            : `Campaign approved and went Live — held package fee charged from Ad Wallet (${campaign.packageName})`,
+        reference:
+          paymentSource === 'sales_earnings'
+            ? `ERN-CHG-${campaign.id.toUpperCase()}`
+            : `CHG-${campaign.id.toUpperCase()}`,
         amount: campaign.price,
         balanceImpact: 'debit',
-        fundingSource: 'available',
+        fundingSource:
+          paymentSource === 'sales_earnings' ? 'sales_earnings' : 'available',
+        paymentSource,
         status: 'completed',
         relatedCampaignId: campaign.id,
         relatedCampaignName: `${campaign.productName} — ${campaign.placementName}`,
@@ -1341,6 +1495,7 @@ export const AdsBackendService = {
 
     const liveCampaign: SponsoredCampaign = {
       ...campaign,
+      paymentSource,
       status: 'live',
       fundsState: 'charged',
       updatedAt: nowIso,
@@ -1357,7 +1512,9 @@ export const AdsBackendService = {
       permissions: computeCampaignPermissions(
         'live',
         'charged',
-        campaign.price
+        campaign.price,
+        true,
+        paymentSource
       ),
     };
 
@@ -1367,14 +1524,14 @@ export const AdsBackendService = {
 
     return {
       campaign: liveCampaign,
-      wallet: updatedWallet,
+      wallet,
       transaction: chargeTx,
     };
   },
 
   /**
    * Transitions an Approved / Scheduled campaign to Live when its start date arrives,
-   * charging the held funds in the Ad Wallet.
+   * finalizing the held funds charge from the campaign's payment source.
    */
   activateScheduledCampaign(
     campaignId: string,
@@ -1393,24 +1550,39 @@ export const AdsBackendService = {
       throw new Error('Only Approved / Scheduled campaigns can be activated to Live.');
     }
 
+    const paymentSource: CampaignPaymentSource =
+      campaign.paymentSource || 'ad_wallet';
     const nowIso = new Date().toISOString();
-    const wallet = this.getWalletAccount(merchantId);
-    const updatedWallet: AdWalletAccount = {
-      ...wallet,
-      heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
-      updatedAt: nowIso,
-    };
-    this.saveWalletAccount(updatedWallet, merchantId);
+    let wallet = this.getWalletAccount(merchantId);
+
+    if (paymentSource === 'sales_earnings') {
+      SalesStorage.finalizeSalesEarningsPromotionCharge(campaign.id);
+    } else {
+      wallet = {
+        ...wallet,
+        heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
+        updatedAt: nowIso,
+      };
+      this.saveWalletAccount(wallet, merchantId);
+    }
 
     const chargeTx = this.appendWalletTransaction(
       {
         merchantId,
         type: 'charge',
-        description: `Scheduled campaign started and went Live — held funds charged`,
-        reference: `CHG-${campaign.id.toUpperCase()}`,
+        description:
+          paymentSource === 'sales_earnings'
+            ? `Scheduled campaign started and went Live — payment finalized from Sales Earnings`
+            : `Scheduled campaign started and went Live — held Ad Wallet funds charged`,
+        reference:
+          paymentSource === 'sales_earnings'
+            ? `ERN-CHG-${campaign.id.toUpperCase()}`
+            : `CHG-${campaign.id.toUpperCase()}`,
         amount: campaign.price,
         balanceImpact: 'debit',
-        fundingSource: 'available',
+        fundingSource:
+          paymentSource === 'sales_earnings' ? 'sales_earnings' : 'available',
+        paymentSource,
         status: 'completed',
         relatedCampaignId: campaign.id,
         relatedCampaignName: `${campaign.productName} — ${campaign.placementName}`,
@@ -1420,6 +1592,7 @@ export const AdsBackendService = {
 
     const liveCampaign: SponsoredCampaign = {
       ...campaign,
+      paymentSource,
       status: 'live',
       fundsState: 'charged',
       updatedAt: nowIso,
@@ -1431,7 +1604,9 @@ export const AdsBackendService = {
       permissions: computeCampaignPermissions(
         'live',
         'charged',
-        campaign.price
+        campaign.price,
+        true,
+        paymentSource
       ),
     };
 
@@ -1441,7 +1616,7 @@ export const AdsBackendService = {
 
     return {
       campaign: liveCampaign,
-      wallet: updatedWallet,
+      wallet,
       chargeTransaction: chargeTx,
     };
   },
@@ -1465,16 +1640,21 @@ export const AdsBackendService = {
       );
     }
 
+    const paymentSource: CampaignPaymentSource =
+      campaign.paymentSource || 'ad_wallet';
     const nowIso = new Date().toISOString();
     const updated: SponsoredCampaign = {
       ...campaign,
+      paymentSource,
       status: 'paused',
       pauseReason: reason || 'Paused by merchant.',
       updatedAt: nowIso,
       permissions: computeCampaignPermissions(
         'paused',
         campaign.fundsState,
-        campaign.price
+        campaign.price,
+        true,
+        paymentSource
       ),
     };
 
@@ -1509,16 +1689,21 @@ export const AdsBackendService = {
       );
     }
 
+    const paymentSource: CampaignPaymentSource =
+      campaign.paymentSource || 'ad_wallet';
     const nowIso = new Date().toISOString();
     const updated: SponsoredCampaign = {
       ...campaign,
+      paymentSource,
       status: 'live',
       pauseReason: undefined,
       updatedAt: nowIso,
       permissions: computeCampaignPermissions(
         'live',
         campaign.fundsState,
-        campaign.price
+        campaign.price,
+        true,
+        paymentSource
       ),
     };
 
@@ -1530,7 +1715,7 @@ export const AdsBackendService = {
 
   /**
    * Cancels a campaign:
-   * - If cancelled BEFORE start ('pending_review' or 'scheduled' with held funds), releases held funds back to Available Balance and records a 'release' transaction.
+   * - If cancelled BEFORE start ('pending_review' or 'scheduled' with held funds), releases held funds back to the original payment source (Sales Earnings or Ad Wallet) and records a 'release' transaction.
    * - If cancelled AFTER start ('live' or 'paused'), ends the campaign without inventing unconfirmed refund formulas.
    */
   cancelCampaign(
@@ -1552,6 +1737,8 @@ export const AdsBackendService = {
       );
     }
 
+    const paymentSource: CampaignPaymentSource =
+      campaign.paymentSource || 'ad_wallet';
     const nowIso = new Date().toISOString();
     let wallet = this.getWalletAccount(merchantId);
     let releaseTx: WalletTransaction | undefined;
@@ -1563,24 +1750,39 @@ export const AdsBackendService = {
       campaign.fundsState === 'held';
 
     if (isPreStartHold) {
-      wallet = {
-        ...wallet,
-        heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
-        availableBalance: wallet.availableBalance + campaign.price,
-        updatedAt: nowIso,
-      };
-      this.saveWalletAccount(wallet, merchantId);
+      if (paymentSource === 'sales_earnings') {
+        SalesStorage.releaseSalesEarningsPromotionHold(
+          campaign.id,
+          'Pre-start campaign cancellation'
+        );
+      } else {
+        wallet = {
+          ...wallet,
+          heldBalance: Math.max(0, wallet.heldBalance - campaign.price),
+          availableBalance: wallet.availableBalance + campaign.price,
+          updatedAt: nowIso,
+        };
+        this.saveWalletAccount(wallet, merchantId);
+      }
       nextFundsState = 'released';
 
       releaseTx = this.appendWalletTransaction(
         {
           merchantId,
           type: 'release',
-          description: `Held funds released after pre-start campaign cancellation`,
-          reference: `REL-CANC-${campaign.id.toUpperCase()}`,
+          description:
+            paymentSource === 'sales_earnings'
+              ? `Reserved Sales Earnings released after pre-start campaign cancellation`
+              : `Held Ad Wallet funds released after pre-start campaign cancellation`,
+          reference:
+            paymentSource === 'sales_earnings'
+              ? `ERN-REL-CANC-${campaign.id.toUpperCase()}`
+              : `REL-CANC-${campaign.id.toUpperCase()}`,
           amount: campaign.price,
           balanceImpact: 'hold_release',
-          fundingSource: 'available',
+          fundingSource:
+            paymentSource === 'sales_earnings' ? 'sales_earnings' : 'available',
+          paymentSource,
           status: 'completed',
           relatedCampaignId: campaign.id,
           relatedCampaignName: `${campaign.productName} — ${campaign.placementName}`,
@@ -1589,18 +1791,26 @@ export const AdsBackendService = {
       );
     }
 
+    const destinationLabel =
+      paymentSource === 'sales_earnings'
+        ? 'Available Sales Earnings'
+        : 'Ad Wallet';
+
     const cancelledCampaign: SponsoredCampaign = {
       ...campaign,
+      paymentSource,
       status: 'cancelled',
       fundsState: nextFundsState,
       cancellationNote: isPreStartHold
-        ? `Cancelled before campaign start. Held funds (₦${campaign.price.toLocaleString()}) were released back to your Ad Wallet.`
+        ? `Cancelled before campaign start. Held funds (₦${campaign.price.toLocaleString()}) were released back to your ${destinationLabel}.`
         : 'Cancelled by merchant after campaign start.',
       updatedAt: nowIso,
       permissions: computeCampaignPermissions(
         'cancelled',
         nextFundsState,
-        campaign.price
+        campaign.price,
+        true,
+        paymentSource
       ),
     };
 

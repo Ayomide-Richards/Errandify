@@ -74,12 +74,25 @@ export const CampaignDetailsView: React.FC<CampaignDetailsViewProps> = ({
     }
   };
 
+  const isSalesEarningsSource = campaign.paymentSource === 'sales_earnings';
+  const paymentSourceLabel = isSalesEarningsSource
+    ? 'Sales & Earnings (Available Earnings)'
+    : 'Ad Wallet (Prepaid Balance)';
+
   const fundsStateLabels: Record<SponsoredCampaign['fundsState'], string> = {
     none: 'No funds held (Draft)',
-    held: 'Held in Ad Wallet (Awaiting Review / Start)',
-    charged: 'Charged from Ad Wallet',
-    released: 'Hold Released back to Ad Wallet',
-    refunded: 'Refunded to Ad Wallet',
+    held: isSalesEarningsSource
+      ? 'Reserved from Sales Earnings (Awaiting Review / Start)'
+      : 'Held in Ad Wallet (Awaiting Review / Start)',
+    charged: isSalesEarningsSource
+      ? 'Charged from Sales Earnings'
+      : 'Charged from Ad Wallet',
+    released: isSalesEarningsSource
+      ? 'Hold Released back to Available Sales Earnings'
+      : 'Hold Released back to Ad Wallet',
+    refunded: isSalesEarningsSource
+      ? 'Refunded to Available Sales Earnings'
+      : 'Refunded to Ad Wallet',
   };
 
   const perf = campaign.performance;
@@ -373,8 +386,11 @@ export const CampaignDetailsView: React.FC<CampaignDetailsViewProps> = ({
               </p>
             </div>
             <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100">
-              <p className="text-slate-500">Wallet Funds State</p>
+              <p className="text-slate-500">Payment Source</p>
               <p className="font-bold text-slate-900 mt-1">
+                {paymentSourceLabel}
+              </p>
+              <p className="text-[11px] text-slate-500">
                 {fundsStateLabels[campaign.fundsState]}
               </p>
             </div>
@@ -787,7 +803,7 @@ export const AdWalletTopUpModal: React.FC<AdWalletTopUpModalProps> = ({
       {step === 'enter' && (
         <form onSubmit={handleProceedToReview} className="space-y-4">
           <div className="p-3.5 rounded-xl bg-[#F8F6FE] border border-[#DDD0FA] text-xs text-slate-700 leading-relaxed">
-            Your Ad Wallet is a prepaid balance used exclusively for ErrandMarket advertising packages. Ad Wallet funds cannot be withdrawn or transferred to Sales & Earnings.
+            Your Ad Wallet is a prepaid balance for funding ErrandMarket advertising packages independently of your Sales &amp; Earnings. You can also pay for promotions directly from your eligible available sales earnings when creating a campaign.
           </div>
 
           <div>

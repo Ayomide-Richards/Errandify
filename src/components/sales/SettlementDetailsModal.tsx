@@ -18,12 +18,14 @@ interface SettlementDetailsModalProps {
   settlement: SettlementRecord | null;
   isOpen: boolean;
   onClose: () => void;
+  onCompleteAfter72Hours?: (settlement: SettlementRecord) => void;
 }
 
 export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
   settlement,
   isOpen,
   onClose,
+  onCompleteAfter72Hours,
 }) => {
   if (!settlement) return null;
 
@@ -31,6 +33,8 @@ export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
     settlement.orders.length > 0
       ? settlement.orders.length
       : settlement.transactionIds.length;
+  const isMerchantWithdrawal =
+    settlement.recordType === 'merchant_withdrawal';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} maxWidth="2xl" showCloseButton>
@@ -43,23 +47,35 @@ export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
                 <Landmark className="w-4 h-4" />
               </div>
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">
-                Settlement Details
+                {isMerchantWithdrawal
+                  ? 'Merchant Withdrawal Details'
+                  : 'Settlement Details'}
               </h3>
               <SettlementStatusBadge status={settlement.status} />
             </div>
             <p className="text-xs text-slate-500 flex items-center gap-1.5 pl-0.5 flex-wrap">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              <span>Settlement Date: {settlement.settlementDate}</span>
-              <span>·</span>
               <span>
-                {ordersCount} {ordersCount === 1 ? 'order' : 'orders'} included
+                {isMerchantWithdrawal ? 'Request Date:' : 'Settlement Date:'}{' '}
+                {settlement.processingDate || settlement.settlementDate}
               </span>
+              {ordersCount > 0 && (
+                <>
+                  <span>·</span>
+                  <span>
+                    {ordersCount} {ordersCount === 1 ? 'order' : 'orders'}{' '}
+                    included
+                  </span>
+                </>
+              )}
             </p>
           </div>
 
           <div className="sm:text-right bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-slate-100 sm:border-0">
             <span className="text-xs text-slate-400 block">
-              Settlement Amount
+              {isMerchantWithdrawal
+                ? 'Withdrawal Amount'
+                : 'Settlement Amount'}
             </span>
             <span className="text-xl font-extrabold text-[#5E17EB] tabular-nums">
               {formatNaira(settlement.settlementAmount)}
@@ -130,20 +146,30 @@ export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
               ) : (
                 <Clock className="w-3.5 h-3.5 text-sky-600" />
               )}
-              Settlement Processing & Reference
+              72-Hour Processing & Payout Timeline
             </span>
             <div className="space-y-1.5 pt-0.5">
               {settlement.processingDate && (
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Processing Date:</span>
+                  <span className="text-slate-500">Request Date:</span>
                   <span className="font-medium text-slate-800">
                     {settlement.processingDate}
                   </span>
                 </div>
               )}
+              {settlement.expectedPayoutDate && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">
+                    Expected Payout (72h):
+                  </span>
+                  <span className="font-semibold text-[#5E17EB]">
+                    {settlement.expectedPayoutDate}
+                  </span>
+                </div>
+              )}
               {settlement.paidDate && (
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Payment Date:</span>
+                  <span className="text-slate-500">Deposited Date:</span>
                   <span className="font-semibold text-emerald-700">
                     {settlement.paidDate}
                   </span>
@@ -159,10 +185,28 @@ export const SettlementDetailsModal: React.FC<SettlementDetailsModalProps> = ({
                 </div>
               )}
               {settlement.status === 'processing' && (
-                <p className="text-[11px] text-slate-500 leading-relaxed pt-0.5">
-                  This automatic settlement is currently being processed. It
-                  will be marked as Paid once the payout transfer is confirmed.
-                </p>
+                <div className="pt-1 space-y-2">
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    This withdrawal is in its mandatory{' '}
+                    <span className="font-semibold text-slate-700">
+                      72-hour processing period
+                    </span>{' '}
+                    to allow customers time to confirm satisfaction with their
+                    orders before funds are deposited into your registered bank
+                    account.
+                  </p>
+                  {onCompleteAfter72Hours && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      leftIcon={<CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                      onClick={() => onCompleteAfter72Hours(settlement)}
+                    >
+                      Simulate 72-Hour Period Elapsed (Complete Bank Deposit)
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           </div>

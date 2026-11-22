@@ -92,14 +92,21 @@ export interface SettlementIncludedOrder {
 }
 
 /**
- * Represents an automatic merchant settlement combining eligible funds from multiple delivered orders.
+ * Represents an automatic merchant settlement or merchant-initiated withdrawal
+ * with a 72-hour processing period before bank deposit.
  */
 export interface SettlementRecord {
   id: string;
+  recordType?: 'merchant_withdrawal' | 'combined_settlement';
   settlementDate: string; // Human-readable date
   createdAt: string; // ISO 8601 timestamp
-  processingDate?: string;
-  paidDate?: string;
+  requestedAt?: string; // ISO 8601 timestamp when withdrawal was initiated
+  processingDate?: string; // Human-readable request / processing start date & time
+  expectedPayoutAt?: string; // ISO 8601 timestamp (requestedAt + 72 hours)
+  expectedPayoutDate?: string; // Human-readable expected payout date & time (after 72h)
+  processingHours?: number; // 72-hour processing period
+  paidAt?: string; // ISO 8601 timestamp when deposited
+  paidDate?: string; // Human-readable date & time when deposited
   settlementAmount: number;
   status: SettlementStatus;
   transactionIds: string[];
@@ -109,6 +116,82 @@ export interface SettlementRecord {
   accountName?: string;
   transactionReference?: string;
   failureReason?: string;
+  idempotencyKey?: string;
+}
+
+/**
+ * Tracks a promotion campaign payment funded directly from the merchant's
+ * eligible available sales earnings.
+ */
+export interface SalesEarningsPromotionRecord {
+  id: string;
+  merchantId: string;
+  campaignId: string;
+  campaignName: string;
+  productId: string;
+  productName: string;
+  placementName: string;
+  packageName: string;
+  amount: number;
+  state: 'held' | 'charged' | 'released';
+  paymentSource: 'sales_earnings';
+  reference: string;
+  createdAt: string;
+  updatedAt: string;
+  formattedDate: string;
+  idempotencyKey?: string;
+}
+
+/**
+ * Immutable financial ledger entry for Sales & Earnings movements
+ * (withdrawals requested, withdrawals paid after 72h, promotion payments from earnings, and released holds).
+ */
+export interface SalesFinancialLedgerEntry {
+  id: string;
+  timestamp: string;
+  formattedDate: string;
+  type:
+    | 'withdrawal_requested'
+    | 'withdrawal_paid'
+    | 'promotion_hold'
+    | 'promotion_charge'
+    | 'promotion_release';
+  description: string;
+  reference: string;
+  amount: number;
+  direction: 'debit' | 'credit' | 'neutral';
+  status: 'processing' | 'completed' | 'released' | 'failed';
+  paymentSource: 'sales_earnings';
+  relatedWithdrawalId?: string;
+  relatedCampaignId?: string;
+  relatedCampaignName?: string;
+  expectedPayoutDate?: string;
+  bankSummary?: string;
+}
+
+/**
+ * Authoritative summary of merchant sales earnings, escrow holdings,
+ * 72-hour pending withdrawals, paid withdrawals, and promotion payments from earnings.
+ */
+export interface EarningsBalanceSummary {
+  totalConfirmedSales: number;
+  awaitingReleaseInEscrow: number;
+  inEscrowOrderCount: number;
+  totalReleasedFromEscrow: number;
+  releasedOrderCount: number;
+  availableEarnings: number;
+  pendingWithdrawals: number;
+  pendingWithdrawalCount: number;
+  successfullyPaidWithdrawals: number;
+  paidWithdrawalCount: number;
+  promotionSpendFromEarnings: number;
+  promotionHeldFromEarnings: number;
+  promotionChargedFromEarnings: number;
+  bankDetails: {
+    bankName: string;
+    maskedAccountNumber: string;
+    accountName: string;
+  };
 }
 
 export interface OverviewSummaryMetrics {
@@ -126,6 +209,8 @@ export interface OverviewSummaryMetrics {
 export interface SettlementSummaryMetrics {
   awaitingRelease: number;
   awaitingReleaseCount: number;
+  availableEarnings: number;
+  availableOrderCount: number;
   processing: number;
   processingSettlementCount: number;
   processingOrderCount: number;
@@ -134,6 +219,7 @@ export interface SettlementSummaryMetrics {
   successfullyPaid: number;
   paidSettlementCount: number;
   paidOrderCount: number;
+  promotionSpendFromEarnings: number;
 }
 
 export interface SalesChartBucket {
